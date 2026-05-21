@@ -261,6 +261,28 @@ def render_create(edit_id: str | None = None):
     if existing and "form_name" not in st.session_state:
         _seed_form_from_existing(existing)
 
+    # Default-initialize any missing form keys exactly once.
+    # This is required so widgets can use `key=` alone (no `value=`),
+    # which avoids Streamlit's value/key collision warnings and rendering glitches.
+    _defaults = {
+        "form_name": "",
+        "form_industry": "",
+        "form_specifics": "",
+        "form_other_description": "",
+        "form_email": "",
+        "form_frequency": "none",
+        "form_lookback": 7,
+        "form_generated_title": "",
+        "form_generated_subtitle": "",
+    }
+    for _k, _default in _defaults.items():
+        if _k not in st.session_state:
+            st.session_state[_k] = _default
+    for _cat_key, _cat_def in CATEGORY_DEFINITIONS.items():
+        _sk = f"form_cat_{_cat_key}"
+        if _sk not in st.session_state:
+            st.session_state[_sk] = _cat_def["default"]
+
     has_api_key = bool(get_anthropic_key())
     if not has_api_key:
         st.error(
@@ -287,7 +309,6 @@ def render_create(edit_id: str | None = None):
     )
     name = st.text_input(
         "Company name",
-        value=st.session_state.get("form_name", ""),
         placeholder="e.g., Industrial Defender",
         key="form_name",
         label_visibility="collapsed",
@@ -303,7 +324,6 @@ def render_create(edit_id: str | None = None):
     )
     industry = st.text_input(
         "Industry / market",
-        value=st.session_state.get("form_industry", ""),
         placeholder="e.g., OT security for critical infrastructure",
         key="form_industry",
         label_visibility="collapsed",
@@ -320,8 +340,7 @@ def render_create(edit_id: str | None = None):
     enabled_categories: list[str] = []
     for cat_key, cat_def in CATEGORY_DEFINITIONS.items():
         state_key = f"form_cat_{cat_key}"
-        current = st.session_state.get(state_key, cat_def["default"])
-        checked = st.checkbox(cat_def["label"], value=current, key=state_key)
+        checked = st.checkbox(cat_def["label"], key=state_key)
         if checked:
             enabled_categories.append(cat_key)
 
@@ -342,7 +361,6 @@ def render_create(edit_id: str | None = None):
         )
         other_description = st.text_area(
             "Other theme description",
-            value=st.session_state.get("form_other_description", ""),
             placeholder="e.g., AI safety regulation and government oversight of frontier AI labs.",
             key="form_other_description",
             height=80,
@@ -360,7 +378,6 @@ def render_create(edit_id: str | None = None):
     )
     specifics = st.text_area(
         "Specifics",
-        value=st.session_state.get("form_specifics", ""),
         placeholder=(
             "e.g., Competitors: Claroty, Dragos, Nozomi Networks, Armis, TXOne. "
             "Regulations: NIS2 directive, NERC-CIP, TSA pipeline directives, CISA advisories. "
@@ -383,7 +400,6 @@ def render_create(edit_id: str | None = None):
     with cols[0]:
         email = st.text_input(
             "Your email",
-            value=st.session_state.get("form_email", ""),
             placeholder="you@banneker.com",
             key="form_email",
         )
@@ -395,10 +411,12 @@ def render_create(edit_id: str | None = None):
             "weekly_friday": "Weekly · Friday",
             "daily": "Daily",
         }
+        # Defensive: if something corrupted form_frequency, snap it back to a valid value.
+        if st.session_state.get("form_frequency") not in freq_options:
+            st.session_state["form_frequency"] = "none"
         frequency = st.selectbox(
             "Frequency",
             options=freq_options,
-            index=freq_options.index(st.session_state.get("form_frequency", "none")),
             format_func=lambda v: freq_labels[v],
             key="form_frequency",
         )
@@ -440,18 +458,17 @@ def render_create(edit_id: str | None = None):
 
         gen_title = st.text_input(
             "Brief title",
-            value=st.session_state.get("form_generated_title", ""),
             key="form_generated_title",
         )
         gen_subtitle = st.text_input(
             "Subtitle",
-            value=st.session_state.get("form_generated_subtitle", ""),
             key="form_generated_subtitle",
         )
+        if st.session_state.get("form_lookback") not in [3, 7, 14, 30]:
+            st.session_state["form_lookback"] = 7
         lookback = st.selectbox(
             "Lookback window",
             options=[3, 7, 14, 30],
-            index=[3, 7, 14, 30].index(st.session_state.get("form_lookback", 7)),
             format_func=lambda d: f"Past {d} days",
             key="form_lookback",
         )
