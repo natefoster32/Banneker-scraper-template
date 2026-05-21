@@ -189,6 +189,34 @@ For each tracker, first pick 2-4 industry-anchor terms from the user's industry 
 
 The test for each query: "If I read three loose interpretations of the words in this query, would they all be about the user's industry?" If no, add an anchor term.
 
+## 6. SOFTWARE FOCUS (Banneker-specific). EVERY non-regulatory query must filter for software/tech news.
+
+Banneker Partners invests exclusively in software/tech companies. Every tracker is built for a software portco or software deal target. The user does NOT care about news affecting the physical/operational side of the industry — only the software/tech sub-segment.
+
+Examples of news that should NEVER appear in these trackers:
+- "HEB acquires land for new distribution center" — physical grocery operations, not software
+- "Fresh produce industry survey group relocates" — corporate-move news, not software
+- "Tyson Foods buys poultry farm" — agriculture M&A, not software
+- "Hospital system opens new wing" — healthcare facility news, not software
+
+The rule: every query for the COMPETITIVE, CUSTOMER WINS, PRODUCT LAUNCHES, GEOGRAPHIC, TALENT, and OTHER themes must contain a software/tech qualifier. Choose from: "software", "SaaS", "platform", "technology", "tech", "AI", "automation", "digital", "app", or an industry-specific software acronym (RCM, EHR, ERP, CRM, etc.).
+
+EXCEPTION — INDUSTRY NEWS & REGULATORY LANDSCAPE: this single theme covers broader policy, regulation, and industry trends that affect the whole industry, not just software vendors. Queries here may omit the software qualifier when the topic is genuinely industry-wide (a new FDA traceability rule, an EPA mandate, a Congressional hearing). When a regulation is software-relevant, still pair it with software language where natural.
+
+Bad/good pairs (fresh produce software tracker):
+- BAD: "HEB acquisition"  →  matches "HEB acquires land", "HEB acquires grocery chain"
+- GOOD: "HEB software contract", "HEB selects technology platform", "HEB SaaS deal"
+
+- BAD: "fresh produce acquisition"  →  matches farm acquisitions, distribution-center M&A
+- GOOD: "fresh produce software acquisition", "produce SaaS acquired", "grocery tech M&A"
+
+- BAD: "produce industry executive moves"  →  matches plant/warehouse hires
+- GOOD: "produce software CEO", "agtech executive hire", "produce SaaS appoints"
+
+For inherently digital industries (cybersecurity, fintech, AI, devops), the industry name itself implies software — you don't need to double up the qualifier. "OT cybersecurity acquisition" is fine without adding "software" because OT cybersecurity is inherently software.
+
+The test for each non-regulatory query: "Would the matching article be about a software company, software product, or technology platform? Or could it be about physical operations, real estate, hiring at a plant, or the underlying physical industry?" Only the former is in scope.
+
 # OUTPUT STRUCTURE
 
 Return one theme per enabled category, in this priority order if applicable:
@@ -238,9 +266,14 @@ def _build_user_prompt(company_name: str, industry: str, enabled_categories: lis
 # USER-PROVIDED SPECIFICS (incorporate as named-entity queries within the relevant themes)
 {specifics_block}{other_block}
 
-Before generating queries, internally identify 2-4 INDUSTRY-ANCHOR TERMS from the industry description above — the words a journalist actually writing about this industry would use in a headline. Every single query you generate must contain at least one anchor term. If you find yourself writing a query with only generic event words (acquisition, Series B, M&A, raises), add an anchor.
+Before generating queries:
+1. Internally identify 2-4 INDUSTRY-ANCHOR TERMS from the industry description above — the words a journalist actually writing about this industry would use in a headline.
+2. Identify whether this is an inherently-digital industry (cyber, fintech, AI) or a physical industry with a software sub-segment (food, healthcare, energy, industrials).
+3. For physical-industry trackers, pick 1-2 SOFTWARE-QUALIFIER terms (software, SaaS, platform, technology, etc.) that you will pair with the industry anchor.
 
-Generate the structured tracker config now. Remember: news-only (avoid market-report queries), mix broad event queries with named queries, use strong event verbs, every query must include an industry-anchor term, 8-15 queries per theme."""
+Every single non-regulatory query must contain BOTH an industry anchor AND (for physical-industry trackers) a software qualifier. If you find yourself writing "HEB acquisition" or "fresh produce M&A", stop and add a software qualifier.
+
+Generate the structured tracker config now. Remember: news-only (avoid market-report queries), mix broad event queries with named queries, use strong event verbs, every query needs an industry anchor + software qualifier (except regulatory-landscape queries), 8-15 queries per theme."""
 
 
 def generate_config(
