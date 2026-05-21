@@ -144,25 +144,39 @@ def render_footer():
 LOGO_PATH = "assets/banneker-logo.png"
 
 
-def render_masthead(title: str, subtitle: str = ""):
+def render_masthead(title: str, subtitle: str = "", compact: bool = False):
     # Banneker logo above the navy rule
+    logo_width = 130 if compact else 180
     try:
-        st.image(LOGO_PATH, width=180)
+        st.image(LOGO_PATH, width=logo_width)
     except Exception:
         pass
 
-    sub_html = (
-        f"<div style='color:{PERIWINKLE}; font-weight:700; font-size:13px; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:14px;'>{subtitle}</div>"
-        if subtitle else ""
-    )
-    st.markdown(
-        f"""
-        <div style='border-top:4px solid {NAVY}; padding-top:18px; margin-bottom:8px; margin-top:14px;'></div>
-        <h1 style='color:{NAVY}; font-weight:800; font-size:38px; line-height:1.1; margin:0 0 6px 0; letter-spacing:-0.5px;'>{title}</h1>
-        {sub_html}
-        """,
-        unsafe_allow_html=True,
-    )
+    if compact:
+        sub_html = (
+            f"<span style='color:{PERIWINKLE}; font-weight:700; font-size:11px; letter-spacing:1.4px; text-transform:uppercase; margin-left:10px; vertical-align:middle;'>{subtitle}</span>"
+            if subtitle else ""
+        )
+        st.markdown(
+            f"""
+            <div style='border-top:3px solid {NAVY}; padding-top:10px; margin-bottom:6px; margin-top:8px;'></div>
+            <h1 style='color:{NAVY}; font-weight:800; font-size:24px; line-height:1.15; margin:0 0 10px 0; letter-spacing:-0.3px;'>{title}{sub_html}</h1>
+            """,
+            unsafe_allow_html=True,
+        )
+    else:
+        sub_html = (
+            f"<div style='color:{PERIWINKLE}; font-weight:700; font-size:13px; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:14px;'>{subtitle}</div>"
+            if subtitle else ""
+        )
+        st.markdown(
+            f"""
+            <div style='border-top:4px solid {NAVY}; padding-top:18px; margin-bottom:8px; margin-top:14px;'></div>
+            <h1 style='color:{NAVY}; font-weight:800; font-size:38px; line-height:1.1; margin:0 0 6px 0; letter-spacing:-0.5px;'>{title}</h1>
+            {sub_html}
+            """,
+            unsafe_allow_html=True,
+        )
 
 
 # ---------- Home ----------
@@ -209,9 +223,9 @@ def render_home():
 # ---------- Create ----------
 
 FORM_KEYS = [
-    "form_name", "form_industry", "form_specifics", "form_email",
-    "form_frequency", "form_generated_title", "form_generated_subtitle",
-    "form_generated_themes", "form_lookback",
+    "form_name", "form_industry", "form_specifics", "form_other_description",
+    "form_email", "form_frequency", "form_generated_title",
+    "form_generated_subtitle", "form_generated_themes", "form_lookback",
 ]
 FORM_KEYS += [f"form_cat_{k}" for k in CATEGORY_DEFINITIONS.keys()]
 
@@ -225,6 +239,7 @@ def _seed_form_from_existing(cfg: dict):
     st.session_state["form_name"] = cfg.get("name", "")
     st.session_state["form_industry"] = cfg.get("industry_description", "")
     st.session_state["form_specifics"] = cfg.get("specifics", "") or cfg.get("themes_description", "")
+    st.session_state["form_other_description"] = cfg.get("other_description", "")
     sub = cfg.get("email_subscription") or {}
     st.session_state["form_email"] = sub.get("email", "")
     st.session_state["form_frequency"] = sub.get("frequency", "none")
@@ -298,7 +313,7 @@ def render_create(edit_id: str | None = None):
     st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>3. What to track</h3>", unsafe_allow_html=True)
     st.markdown(
         f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:10px;'>"
-        "The first three are pre-checked as sensible defaults. Uncheck what you don't need, check what you do. Tick \"Other\" if you want a custom theme — describe it in the specifics field below."
+        "The first three are pre-checked as sensible defaults. Uncheck what you don't need, check what you do. Tick \"Other\" to add a custom theme — a description field will appear."
         "</div>",
         unsafe_allow_html=True,
     )
@@ -310,12 +325,35 @@ def render_create(edit_id: str | None = None):
         if checked:
             enabled_categories.append(cat_key)
 
+    # --- Conditional: Other theme description (only when "Other" is checked) ---
+    other_description = ""
+    if "other" in enabled_categories:
+        st.markdown(
+            f"<div style='color:{NAVY}; font-size:13px; font-weight:700; margin-top:12px; margin-bottom:4px;'>"
+            "Describe your custom \"Other\" theme"
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f"<div style='color:{MID_GREY}; font-size:12px; margin-bottom:6px;'>"
+            "One or two sentences on what news you want surfaced. Claude will build a section just for this."
+            "</div>",
+            unsafe_allow_html=True,
+        )
+        other_description = st.text_area(
+            "Other theme description",
+            value=st.session_state.get("form_other_description", ""),
+            placeholder="e.g., AI safety regulation and government oversight of frontier AI labs.",
+            key="form_other_description",
+            height=80,
+            label_visibility="collapsed",
+        )
+
     # --- Question 4: Specifics (optional) ---
     st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>4. Anything special to call out or cover? (optional)</h3>", unsafe_allow_html=True)
     st.markdown(
         f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:8px;'>"
-        "Named competitors, specific regions/countries, specific regulations, named customers, "
-        "or — if you ticked \"Other\" above — a description of the custom theme you want tracked. "
+        "Named competitors, specific regions/countries, named customers, named regulations. "
         "Claude uses these as named-entity queries within the themes above."
         "</div>",
         unsafe_allow_html=True,
@@ -379,7 +417,7 @@ def render_create(edit_id: str | None = None):
             st.error("Check at least one category in question 3.")
         else:
             with st.spinner("Claude is building your themes and queries (~10-20 seconds)..."):
-                generated = generate_config(name, industry, enabled_categories, specifics)
+                generated = generate_config(name, industry, enabled_categories, specifics, other_description)
             if generated is None:
                 st.error(
                     "Generation failed. Check that the Claude API key is set in Streamlit Secrets "
@@ -481,6 +519,7 @@ def render_create(edit_id: str | None = None):
                 "name": name.strip(),
                 "industry_description": industry.strip(),
                 "specifics": specifics.strip(),
+                "other_description": other_description.strip(),
                 "enabled_categories": enabled_categories,
                 "title": gen_title.strip() or f"{name.strip()} Brief",
                 "subtitle": gen_subtitle.strip(),
@@ -521,12 +560,20 @@ def render_view(tracker_id: str):
     title = config.get("title") or f"{config.get('name', 'News')} Brief"
     subtitle = config.get("subtitle", "")
 
-    render_masthead(title, subtitle)
+    render_masthead(title, subtitle, compact=True)
 
+    # Compact status strip — small inline summary, no big paragraph
+    sub = config.get("email_subscription") or {}
+    if sub:
+        sub_status = (
+            f"Email: <strong>{sub.get('email', '')}</strong> &middot; "
+            f"{ {'weekly_monday': 'Weekly · Monday', 'weekly_friday': 'Weekly · Friday', 'daily': 'Daily'}.get(sub.get('frequency', ''), 'Off') }"
+        )
+    else:
+        sub_status = "Email: <em>not set up</em>"
     st.markdown(
-        f"<div style='color:{BODY_GREY}; font-size:14px; line-height:1.5; margin-bottom:20px; max-width:640px;'>"
-        f"Click the button to pull the last {config.get('lookback_days', 7)} days of news across "
-        f"{len(config.get('themes', []))} themes. Fresh every click."
+        f"<div style='color:{MID_GREY}; font-size:12px; margin-bottom:12px;'>"
+        f"Lookback {config.get('lookback_days', 7)}d &middot; {len(config.get('themes', []))} themes &middot; {sub_status}"
         f"</div>",
         unsafe_allow_html=True,
     )

@@ -57,32 +57,11 @@ CATEGORY_DEFINITIONS = {
         "guidance": (
             "General industry news: market developments, demand shifts, infrastructure "
             "investment, major customer/end-market trends, AND the regulatory landscape "
-            "(policy direction, agency rule-makings, legislative pushes, court rulings) "
-            "shaping the industry. Broader than the 'Regulation' category — focus on "
-            "narrative/landscape news that frames the market, not just discrete enforcement "
-            "actions. Mix vertical-qualified event queries with named-policy/named-agency queries."
-        ),
-    },
-    "breaches": {
-        "label": "Breaches & security incidents",
-        "default": False,
-        "guidance": (
-            "Cyberattacks, ransomware, data breaches, exploits, vulnerabilities affecting "
-            "the industry. These often double as FUD content for sales/marketing. Use "
-            "event verbs (breach, attack, hacked, ransomware, exploit, leaked) plus vertical "
-            "qualifiers (utility, oil gas, manufacturing, healthcare, etc.)."
-        ),
-    },
-    "regulation": {
-        "label": "Specific regulations & enforcement actions",
-        "default": False,
-        "guidance": (
-            "Discrete enforcement actions, fines, named-regulation rule-makings, agency "
-            "advisories, compliance deadlines. Name the actual regulations and agencies in "
-            "queries (e.g. 'NIS2 directive enforcement', 'FDA 510k clearance', 'CFPB "
-            "enforcement'), not generic phrases like 'cybersecurity regulation'. Use this "
-            "category when the user cares about specific named regulations they comply with; "
-            "use 'Industry news & regulatory landscape' for broader policy-direction news."
+            "(policy direction, agency rule-makings, legislative pushes, enforcement actions, "
+            "named regulations, compliance deadlines). Cover both narrative/landscape news "
+            "AND discrete regulatory events in one theme. Mix vertical-qualified event "
+            "queries with named-policy/named-agency queries (e.g. 'NIS2 directive', 'NERC-CIP "
+            "audit', 'FDA 510k', 'CFPB enforcement')."
         ),
     },
     "product_launches": {
@@ -111,14 +90,14 @@ CATEGORY_DEFINITIONS = {
         ),
     },
     "other": {
-        "label": "Other (describe in the specifics field below)",
+        "label": "Other (describe a custom theme)",
         "default": False,
         "guidance": (
-            "User-defined theme. READ THE SPECIFICS FIELD to identify what topic the user "
-            "wants tracked, then build a theme name and 8-15 queries around it. Apply the "
-            "same principles: broad event queries + named-entity queries, strong event verbs, "
-            "avoid market-report phrasing. If the specifics field is empty or doesn't suggest "
-            "a clear topic, skip this theme entirely (don't fabricate one)."
+            "User-defined theme. The user fills in a dedicated 'Other theme description' "
+            "field — read it carefully and build a theme name and 8-15 queries around exactly "
+            "that topic. Apply the same principles: broad event queries + named-entity queries, "
+            "strong event verbs, avoid market-report phrasing. If the Other-theme description "
+            "is empty or doesn't suggest a clear topic, skip this theme entirely."
         ),
     },
 }
@@ -194,19 +173,17 @@ Talent: appoints, hires, joins, departs, resigns, names CEO
 # OUTPUT STRUCTURE
 
 Return one theme per enabled category, in this priority order if applicable:
-1. Breaches & incidents (highest signal for FUD/sales material — only if enabled)
-2. Competitive (M&A, raises, partnerships)
+1. Competitive (M&A, raises, partnerships)
+2. Customer wins
 3. Industry news & regulatory landscape
-4. Specific regulations & enforcement actions
-5. Customer wins
-6. Product launches
-7. Geographic
-8. Talent
-9. Other (user-defined from specifics)
+4. Other (user-defined custom theme)
+5. Product launches
+6. Geographic
+7. Talent
 
 Each theme should have 8-15 queries. Mix broad event queries with named-entity queries pulled from the user's specifics (if provided).
 
-If the "Other" category is enabled but the specifics field doesn't suggest a clear topic for it, skip that theme — don't fabricate one.
+If the "Other" category is enabled but the Other-theme description is empty, skip that theme — don't fabricate one.
 
 # TITLE/SUBTITLE
 
@@ -216,12 +193,17 @@ If the "Other" category is enabled but the specifics field doesn't suggest a cle
 Return ONLY the structured JSON — no preamble, no explanation."""
 
 
-def _build_user_prompt(company_name: str, industry: str, enabled_categories: list[str], specifics: str) -> str:
+def _build_user_prompt(company_name: str, industry: str, enabled_categories: list[str], specifics: str, other_description: str = "") -> str:
     enabled_block = "\n".join(
         f"- {key} — {CATEGORY_DEFINITIONS[key]['label']}\n  Guidance: {CATEGORY_DEFINITIONS[key]['guidance']}"
         for key in enabled_categories if key in CATEGORY_DEFINITIONS
     )
     specifics_block = specifics.strip() or "(none provided — use defaults for the industry)"
+
+    other_block = ""
+    if "other" in enabled_categories:
+        desc = other_description.strip() or "(empty — skip the Other theme entirely)"
+        other_block = f"\n\n# OTHER-THEME DESCRIPTION (use this to build the 'Other' theme)\n{desc}"
 
     return f"""Build a weekly news tracker.
 
@@ -235,7 +217,7 @@ def _build_user_prompt(company_name: str, industry: str, enabled_categories: lis
 {enabled_block}
 
 # USER-PROVIDED SPECIFICS (incorporate as named-entity queries within the relevant themes)
-{specifics_block}
+{specifics_block}{other_block}
 
 Generate the structured tracker config now. Remember: news-only (avoid market-report queries), mix broad event queries with named queries, use strong event verbs, 8-15 queries per theme."""
 
@@ -245,6 +227,7 @@ def generate_config(
     industry_description: str,
     enabled_categories: list[str],
     specifics: str = "",
+    other_description: str = "",
 ) -> Optional[dict]:
     """Call Claude API to convert structured inputs → themes/queries config.
 
@@ -263,7 +246,7 @@ def generate_config(
     if not enabled_categories:
         enabled_categories = [k for k, v in CATEGORY_DEFINITIONS.items() if v["default"]]
 
-    user_prompt = _build_user_prompt(company_name, industry_description, enabled_categories, specifics)
+    user_prompt = _build_user_prompt(company_name, industry_description, enabled_categories, specifics, other_description)
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
