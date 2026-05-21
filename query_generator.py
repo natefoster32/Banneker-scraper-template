@@ -217,6 +217,30 @@ For inherently digital industries (cybersecurity, fintech, AI, devops), the indu
 
 The test for each non-regulatory query: "Would the matching article be about a software company, software product, or technology platform? Or could it be about physical operations, real estate, hiring at a plant, or the underlying physical industry?" Only the former is in scope.
 
+## 7. PRIVATE COMPANIES & US MARKET (Banneker defaults).
+
+Banneker is a US-focused lower-middle-market (LMM) software private-equity firm. The deals and portfolios they care about are PRIVATE software companies in the US. So:
+
+PRIVATE-COMPANY BIAS — bias queries toward news about PRIVATE companies:
+- Series A/B/C/D/growth-equity funding rounds (private by definition)
+- Private M&A — strategic + financial-sponsor acquisitions of private targets
+- Private-company partnerships, customer wins, executive moves
+- INCLUDE public-company news ONLY when it's material to the private market: a public strategic acquiring a notable private company, a large IPO of a relevant player, major public-market consolidation that resets valuations. Drop routine quarterly earnings, EPS chatter, sell-side coverage of large caps — even when the brand is industry-relevant.
+- For named-entity queries, prefer private competitors over public ones. ProducePay, Crisp, Afresh, Shelf Engine, Silo > Manhattan Associates, SAP, Oracle.
+
+US-MARKET DEFAULT — unless the user explicitly named other regions:
+- For event/named queries, bias toward US-based companies, US deals, US regulations (FDA, USDA, FSMA, NERC, SEC, CFPB, CISA, etc.)
+- For the Geographic theme specifically: if the user named regions, use those; if Geographic is enabled with no specifics, default to "US-region" queries (e.g., specific US states, "California", "Texas", "US Northeast"), NOT random global countries (no India, Nigeria, Belgium, etc. unless the user asked)
+- Even outside the Geographic theme, don't lead with foreign-market queries
+
+EXCEPTION: if the user's specifics or industry description explicitly names non-US regions (e.g. "Germany, Poland, UK" or "European market"), follow that.
+
+- BAD (fresh produce SW tracker, no regions specified): "Nigeria farm software", "India agtech IPO", "Belgium produce platform"
+- GOOD: "US fresh produce software acquisition", "California produce tech Series B", "Texas grocery SaaS deal"
+
+- BAD (named): "Manhattan Associates earnings", "SAP supply chain announcement"  →  public-company noise
+- GOOD (named): "ProducePay Series B", "Afresh acquisition", "Crisp customer", "Silo raises"
+
 # OUTPUT STRUCTURE
 
 Return one theme per enabled category, in this priority order if applicable:
@@ -275,7 +299,14 @@ Every single non-regulatory query must contain BOTH an industry anchor (in its n
 
 ALSO AVOID generic adjacencies — for a fresh-produce-software tracker, "supply chain software acquisition" is too broad (matches Manhattan Associates, Blue Yonder, manufacturing supply chain); needs to be "fresh produce supply chain software acquisition" or "produce traceability software acquisition".
 
-Generate the structured tracker config now. Remember: news-only (avoid market-report queries, earnings posts, IPO tracker listicles), mix broad event queries with named queries, use strong event verbs, every query needs the narrowest industry anchor + software qualifier (except regulatory-landscape queries), 8-15 queries per theme."""
+Generate the structured tracker config now. Remember:
+- News-only (avoid market reports, earnings posts, IPO tracker listicles, analyst price targets)
+- Mix broad event queries with named queries
+- Strong event verbs
+- Every query needs the narrowest industry anchor + software qualifier (except regulatory-landscape queries)
+- Bias toward PRIVATE companies (LMM software) and US market (unless user named other regions)
+- For named entities, prefer private competitors (e.g. ProducePay/Crisp/Afresh) over public giants (Manhattan/SAP/Oracle)
+- 8-15 queries per theme"""
 
 
 def generate_config(
@@ -307,7 +338,7 @@ def generate_config(
     try:
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.parse(
-            model="claude-sonnet-4-6",
+            model="claude-opus-4-7",
             max_tokens=6000,
             system=[{
                 "type": "text",
@@ -316,6 +347,7 @@ def generate_config(
             }],
             messages=[{"role": "user", "content": user_prompt}],
             output_format=GeneratedConfig,
+            thinking={"type": "adaptive"},
         )
 
         cfg: GeneratedConfig = response.parsed_output
@@ -378,7 +410,7 @@ Return the FULL revised config — title, subtitle, all themes, all queries. App
     try:
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.parse(
-            model="claude-sonnet-4-6",
+            model="claude-opus-4-7",
             max_tokens=6000,
             system=[{
                 "type": "text",
@@ -387,6 +419,7 @@ Return the FULL revised config — title, subtitle, all themes, all queries. App
             }],
             messages=[{"role": "user", "content": revise_prompt}],
             output_format=GeneratedConfig,
+            thinking={"type": "adaptive"},
         )
         cfg: GeneratedConfig = response.parsed_output
         return {
