@@ -30,7 +30,7 @@ from core import (
 )
 from core import build_email_html
 from email_sender import send_email
-from query_generator import generate_config, get_anthropic_key
+from query_generator import CATEGORY_DEFINITIONS, generate_config, get_anthropic_key
 from storage import delete_config, get_config, load_all_configs, upsert_config
 
 # ---------- Page setup ----------
@@ -200,10 +200,11 @@ def render_home():
 # ---------- Create ----------
 
 FORM_KEYS = [
-    "form_name", "form_industry", "form_themes_desc", "form_email",
+    "form_name", "form_industry", "form_specifics", "form_email",
     "form_frequency", "form_generated_title", "form_generated_subtitle",
     "form_generated_themes", "form_lookback",
 ]
+FORM_KEYS += [f"form_cat_{k}" for k in CATEGORY_DEFINITIONS.keys()]
 
 
 def _clear_form_state():
@@ -214,7 +215,7 @@ def _clear_form_state():
 def _seed_form_from_existing(cfg: dict):
     st.session_state["form_name"] = cfg.get("name", "")
     st.session_state["form_industry"] = cfg.get("industry_description", "")
-    st.session_state["form_themes_desc"] = cfg.get("themes_description", "")
+    st.session_state["form_specifics"] = cfg.get("specifics", "") or cfg.get("themes_description", "")
     sub = cfg.get("email_subscription") or {}
     st.session_state["form_email"] = sub.get("email", "")
     st.session_state["form_frequency"] = sub.get("frequency", "none")
@@ -222,6 +223,9 @@ def _seed_form_from_existing(cfg: dict):
     st.session_state["form_generated_subtitle"] = cfg.get("subtitle", "")
     st.session_state["form_generated_themes"] = cfg.get("themes", [])
     st.session_state["form_lookback"] = cfg.get("lookback_days", 7)
+    saved_cats = cfg.get("enabled_categories") or [k for k, v in CATEGORY_DEFINITIONS.items() if v["default"]]
+    for cat_key in CATEGORY_DEFINITIONS.keys():
+        st.session_state[f"form_cat_{cat_key}"] = cat_key in saved_cats
 
 
 def render_create(edit_id: str | None = None):
@@ -260,47 +264,62 @@ def render_create(edit_id: str | None = None):
     name = st.text_input(
         "Company name",
         value=st.session_state.get("form_name", ""),
-        placeholder="e.g., AcmeFresh",
+        placeholder="e.g., Industrial Defender",
         key="form_name",
         label_visibility="collapsed",
     )
 
-    # --- Question 2: Industry description ---
-    st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>2. Describe the scraper you're looking for</h3>", unsafe_allow_html=True)
+    # --- Question 2: Industry (one line) ---
+    st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>2. Industry / market</h3>", unsafe_allow_html=True)
     st.markdown(
         f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:8px;'>"
-        "What industry, market, or product space? Be specific. Example: \"Fresh produce "
-        "supply chain software for grocery and foodservice operators.\""
+        "One sentence on what this company does and who it sells to."
         "</div>",
         unsafe_allow_html=True,
     )
-    industry = st.text_area(
+    industry = st.text_input(
         "Industry / market",
         value=st.session_state.get("form_industry", ""),
-        placeholder="e.g., Fresh produce supply chain software for grocery and foodservice operators",
+        placeholder="e.g., OT cybersecurity software for utilities, oil & gas, and manufacturing operators",
         key="form_industry",
-        height=100,
         label_visibility="collapsed",
     )
 
-    # --- Question 3: Specific themes ---
-    st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>3. Anything specific you want covered?</h3>", unsafe_allow_html=True)
+    # --- Question 3: Theme category checkboxes ---
+    st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>3. What to track</h3>", unsafe_allow_html=True)
     st.markdown(
-        f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:8px;'>"
-        "Regions, competitors, regulatory topics, M&amp;A activity, customer wins, breach news — whatever matters."
+        f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:10px;'>"
+        "The first four are pre-checked. Uncheck what you don't need, check what you do."
         "</div>",
         unsafe_allow_html=True,
     )
-    themes_desc = st.text_area(
-        "Themes you care about",
-        value=st.session_state.get("form_themes_desc", ""),
+    enabled_categories: list[str] = []
+    for cat_key, cat_def in CATEGORY_DEFINITIONS.items():
+        state_key = f"form_cat_{cat_key}"
+        current = st.session_state.get(state_key, cat_def["default"])
+        checked = st.checkbox(cat_def["label"], value=current, key=state_key)
+        if checked:
+            enabled_categories.append(cat_key)
+
+    # --- Question 4: Specifics (optional) ---
+    st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>4. Anything specific to call out? (optional)</h3>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:8px;'>"
+        "Named competitors, specific regions/countries, specific regulations, or named customers. "
+        "Claude uses these as named-entity queries within the themes above."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    specifics = st.text_area(
+        "Specifics",
+        value=st.session_state.get("form_specifics", ""),
         placeholder=(
-            "e.g., Competitive M&A in foodtech (Crisp, Afresh, Shelf Engine), "
-            "FSMA 204 traceability rule updates, customer wins at Sprouts/Whole Foods/Costco, "
-            "breaches affecting food retailers"
+            "e.g., Competitors: Claroty, Dragos, Nozomi Networks, Armis, TXOne. "
+            "Regulations: NIS2 directive, NERC-CIP, TSA pipeline directives, CISA advisories. "
+            "Regions: Germany, Poland, UK, Italy, Austria, Switzerland."
         ),
-        key="form_themes_desc",
-        height=120,
+        key="form_specifics",
+        height=100,
         label_visibility="collapsed",
     )
 
@@ -346,15 +365,15 @@ def render_create(edit_id: str | None = None):
             st.error("Company name is required.")
         elif not industry.strip():
             st.error("Industry description is required.")
-        elif not themes_desc.strip():
-            st.error("Themes description is required.")
+        elif not enabled_categories:
+            st.error("Check at least one category in question 3.")
         else:
-            with st.spinner("Claude is building your themes and queries..."):
-                generated = generate_config(name, industry, themes_desc)
+            with st.spinner("Claude is building your themes and queries (~10-20 seconds)..."):
+                generated = generate_config(name, industry, enabled_categories, specifics)
             if generated is None:
                 st.error(
                     "Generation failed. Check that the Claude API key is set in Streamlit Secrets "
-                    "and that `pip install anthropic` was added to requirements.txt."
+                    "and that the account has credit available."
                 )
             else:
                 st.session_state["form_generated_title"] = generated["title"]
@@ -451,7 +470,8 @@ def render_create(edit_id: str | None = None):
                 "id": tracker_id,
                 "name": name.strip(),
                 "industry_description": industry.strip(),
-                "themes_description": themes_desc.strip(),
+                "specifics": specifics.strip(),
+                "enabled_categories": enabled_categories,
                 "title": gen_title.strip() or f"{name.strip()} Brief",
                 "subtitle": gen_subtitle.strip(),
                 "themes": valid_themes,

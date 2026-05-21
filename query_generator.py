@@ -8,9 +8,6 @@ Requires `ANTHROPIC_API_KEY` in Streamlit Secrets (or env var for the cron).
 Setup:
   pip install anthropic
   Add to Streamlit Secrets:  ANTHROPIC_API_KEY = "sk-ant-..."
-
-Cost: ~$0.01-0.03 per tracker creation (one-time per user). With Claude's
-prompt caching enabled, the long system prompt is cached on 2nd+ creations.
 """
 
 import os
@@ -31,48 +28,195 @@ def get_anthropic_key() -> str:
     return os.environ.get("ANTHROPIC_API_KEY", "")
 
 
+# Pre-built theme categories the user picks from via checkboxes.
+# Each carries the guidance Claude uses when generating queries for it.
+CATEGORY_DEFINITIONS = {
+    "competitive": {
+        "label": "Competitive moves — M&A, funding, partnerships",
+        "default": True,
+        "guidance": (
+            "M&A activity, capital raises (seed through IPO), partnerships, executive moves, "
+            "product launches by competitors. Mix broad event-language queries (e.g. "
+            "'industrial cybersecurity acquisition', 'OT security Series B funding') with "
+            "named-competitor queries from the user's specifics."
+        ),
+    },
+    "breaches": {
+        "label": "Breaches & security incidents",
+        "default": True,
+        "guidance": (
+            "Cyberattacks, ransomware, data breaches, exploits, vulnerabilities affecting "
+            "the industry. These often double as FUD content for sales/marketing. Use "
+            "event verbs (breach, attack, hacked, ransomware, exploit, leaked) plus vertical "
+            "qualifiers (utility, oil gas, manufacturing, healthcare, etc.)."
+        ),
+    },
+    "regulation": {
+        "label": "Regulatory & compliance updates",
+        "default": True,
+        "guidance": (
+            "New regulations, enforcement actions, fines, agency advisories, compliance "
+            "deadlines. Name the actual regulations and agencies in queries (e.g. 'NIS2 "
+            "directive enforcement', 'FDA 510k clearance', 'CFPB enforcement'), not generic "
+            "phrases like 'cybersecurity regulation'."
+        ),
+    },
+    "customer_wins": {
+        "label": "Customer wins & deployments",
+        "default": True,
+        "guidance": (
+            "Named-customer wins, deployments, contracts, RFP results. Use event verbs "
+            "(selects, deploys, signs, wins, partners with) plus vertical/customer-type "
+            "qualifiers."
+        ),
+    },
+    "product_launches": {
+        "label": "Product launches & innovation",
+        "default": False,
+        "guidance": (
+            "New product announcements, feature releases, major version updates from "
+            "competitors and adjacent players."
+        ),
+    },
+    "geographic": {
+        "label": "Geographic / regional coverage",
+        "default": False,
+        "guidance": (
+            "Country- or region-specific news in the industry. Use country names plus "
+            "industry qualifiers. If the user specified regions in their specifics, use "
+            "those; otherwise default to the largest relevant markets."
+        ),
+    },
+    "talent": {
+        "label": "Talent moves (key hires, departures)",
+        "default": False,
+        "guidance": (
+            "Executive hires and departures at competitors and named portco. Use event "
+            "verbs (appoints, hires, names CEO, departs, joins) plus role qualifiers."
+        ),
+    },
+}
+
+
+def category_keys() -> list[str]:
+    return list(CATEGORY_DEFINITIONS.keys())
+
+
 # Structured-output schema returned by Claude
 class GeneratedTheme(BaseModel):
     name: str = Field(description="Short theme name (3-7 words). Will be used as a section heading.")
-    queries: list[str] = Field(description="6-12 Google News search queries that target this theme.")
+    queries: list[str] = Field(description="8-15 Google News search queries that target this theme.")
 
 
 class GeneratedConfig(BaseModel):
     title: str = Field(description="Brief title shown at top of the deliverable (e.g. 'AcmeFresh Weekly Brief').")
     subtitle: str = Field(description="Subtitle shown beneath title (e.g. 'Banneker Partners · Fresh produce supply chain market intel').")
     themes: list[GeneratedTheme] = Field(
-        description="5-7 themes organized in priority order (most actionable first, typically breaches/incidents then competitive/M&A then regulatory)."
+        description="One theme per enabled category, in priority order (breaches first if enabled, then competitive, then regulation, then others)."
     )
 
 
 SYSTEM_PROMPT = """You are an analyst at Banneker Partners, a software-focused private equity firm. You build weekly news trackers for portfolio companies and deal targets.
 
-Your job: take a brief description of a company and what their team cares about, then return a structured set of themes and Google News RSS queries that will surface high-signal news.
+Your job: take a brief description of a company plus a list of enabled theme categories, then return a structured set of themes and Google News RSS queries that will surface HIGH-SIGNAL NEWS.
 
-Rules for queries:
-- Each query is what you'd type into Google News (3-8 words). Be specific.
-- Avoid generic queries like "cybersecurity" or "healthcare news" — they pull too much noise.
-- Prefer specific phrases ("NIS2 directive enforcement", "FDA 510k clearance"), named competitors, named regulations, and event-language (acquires, raises, breach, fined, recall, partnership).
-- Include 2-3 queries per major sub-area within a theme so coverage is robust to phrasing variation.
-- For competitive themes, include the company itself plus 3-5 named competitors.
-- For regulatory themes, name the specific regulations / agencies (e.g. "NERC-CIP audit", "CMS reimbursement rule", "CFPB enforcement").
-- For breach/incident themes (always include one if industrial / fintech / cyber / data-heavy), include event keywords and named verticals.
+# CRITICAL PRINCIPLES
 
-Rules for themes:
-- 5-7 themes total.
-- Order them by signal value to a busy PE-portco operator: most actionable first.
-- Typical priority order: Breaches/Incidents → Competitive (M&A, raises) → Regulation → Customer/Market dynamics → Geographic.
-- Each theme name should be short and concrete (3-7 words).
+## 1. Optimize for news, NOT market reports.
 
-Rules for title/subtitle:
-- Title: "[Company Name] Weekly Brief" unless context suggests otherwise.
-- Subtitle: "Banneker Partners · [short industry phrase] market intel".
+The Google News RSS we're hitting will return whatever matches the query string. Generic category queries pull market reports from Mordor Intelligence, Grand View Research, MarketsAndMarkets, Gartner, IDC, Statista, Forrester — those are evergreen reports, not news. Avoid query phrasing that primarily returns these.
+
+- BAD: "OT cybersecurity market", "OT cybersecurity trends", "OT cybersecurity industry analysis"
+- GOOD: "OT cybersecurity acquisition", "OT cybersecurity Series B", "ICS vendor acquired", "operational technology security funding round"
+
+The test: would a journalist write an article matching this query, or would only an analyst write a report matching it? If the latter, change the query.
+
+## 2. Mix BROAD event-language queries with NARROW named-entity queries.
+
+Every theme needs both, because:
+- Broad queries catch deals/incidents involving unknown players. (Most acquisitions don't name the acquirer in the headline.)
+- Named queries catch news about specific competitors/regulations/companies the user cares about.
+
+For each theme, aim for ~5-8 broad event queries + ~3-7 named-entity queries = 8-15 total.
+
+Example (competitive theme for an OT cyber portco):
+- Broad: "OT cybersecurity acquisition", "industrial cybersecurity Series B", "ICS vendor acquired", "OT security funding round", "operational technology cybersecurity investment", "industrial control system IPO"
+- Named: "Claroty funding", "Dragos acquired", "Nozomi Networks IPO", "Armis acquisition", "TXOne raises"
+
+Example (competitive theme for fresh produce SaaS):
+- Broad: "produce technology acquisition", "agtech Series B funding", "food supply chain software acquired", "grocery technology IPO", "produce traceability software raises"
+- Named: "Afresh funding", "Shelf Engine acquired", "Crisp Series A", "ProducePay raises"
+
+## 3. Use STRONG event verbs.
+
+Real news has real verbs. Use them in queries to filter out evergreen content.
+
+Acquisition/M&A: acquires, acquired, acquisition, buys, merger, merges
+Funding: raises, raised, Series A/B/C, IPO, funded, valuation
+Launches: launches, unveils, announces, debuts, releases
+Regulation: fined, penalty, settles, indicted, sued, enforcement, advisory
+Security: breach, attack, hacked, ransomware, exploit, leaked, stolen, vulnerability
+Customer: selects, deploys, signs, wins, partners, replaces, adopts
+Talent: appoints, hires, joins, departs, resigns, names CEO
+
+## 4. Be specific with regulations and named entities, generic with categories.
+
+- For regulations: name the actual regulation/agency ("NIS2 directive enforcement", "NERC-CIP audit", "FSMA 204 traceability", "CFPB enforcement"), not "regulations" or "compliance"
+- For competitors: name them individually as separate queries
+- For verticals: use vertical qualifiers ("utility cyberattack", "manufacturing ransomware"), not the bare category
+
+# OUTPUT STRUCTURE
+
+Return one theme per enabled category, in this priority order if applicable:
+1. Breaches & incidents (highest signal for FUD/sales material)
+2. Competitive (M&A, raises, partnerships)
+3. Regulation
+4. Customer wins
+5. Product launches
+6. Geographic
+7. Talent
+
+Each theme should have 8-15 queries. Mix broad event queries with named-entity queries pulled from the user's specifics (if provided).
+
+# TITLE/SUBTITLE
+
+- Title: "[Company Name] Weekly Brief"
+- Subtitle: "Banneker Partners · [short industry phrase] market intel"
 
 Return ONLY the structured JSON — no preamble, no explanation."""
 
 
-def generate_config(company_name: str, industry_description: str, themes_description: str) -> Optional[dict]:
-    """Call Claude API to convert natural language → themes/queries config.
+def _build_user_prompt(company_name: str, industry: str, enabled_categories: list[str], specifics: str) -> str:
+    enabled_block = "\n".join(
+        f"- {key} — {CATEGORY_DEFINITIONS[key]['label']}\n  Guidance: {CATEGORY_DEFINITIONS[key]['guidance']}"
+        for key in enabled_categories if key in CATEGORY_DEFINITIONS
+    )
+    specifics_block = specifics.strip() or "(none provided — use defaults for the industry)"
+
+    return f"""Build a weekly news tracker.
+
+# COMPANY / TRACKER NAME
+{company_name}
+
+# INDUSTRY / MARKET
+{industry.strip()}
+
+# ENABLED THEME CATEGORIES (one theme per category, in this exact order)
+{enabled_block}
+
+# USER-PROVIDED SPECIFICS (incorporate as named-entity queries within the relevant themes)
+{specifics_block}
+
+Generate the structured tracker config now. Remember: news-only (avoid market-report queries), mix broad event queries with named queries, use strong event verbs, 8-15 queries per theme."""
+
+
+def generate_config(
+    company_name: str,
+    industry_description: str,
+    enabled_categories: list[str],
+    specifics: str = "",
+) -> Optional[dict]:
+    """Call Claude API to convert structured inputs → themes/queries config.
 
     Returns a dict with keys {title, subtitle, themes}, or None if the call fails.
     `themes` is a list of {name, queries[]}.
@@ -86,23 +230,16 @@ def generate_config(company_name: str, industry_description: str, themes_descrip
     except ImportError:
         return None
 
-    user_prompt = f"""Build a weekly news tracker for the following:
+    if not enabled_categories:
+        enabled_categories = [k for k, v in CATEGORY_DEFINITIONS.items() if v["default"]]
 
-Company / tracker name: {company_name}
-
-Industry and market the company operates in:
-{industry_description.strip()}
-
-Themes the team specifically wants tracked (regions, competitors, regulatory topics, etc.):
-{themes_description.strip()}
-
-Generate the structured tracker config now."""
+    user_prompt = _build_user_prompt(company_name, industry_description, enabled_categories, specifics)
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.parse(
             model="claude-sonnet-4-6",
-            max_tokens=4000,
+            max_tokens=6000,
             system=[{
                 "type": "text",
                 "text": SYSTEM_PROMPT,
