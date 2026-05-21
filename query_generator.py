@@ -101,7 +101,7 @@ Generate the structured tracker config now."""
     try:
         client = anthropic.Anthropic(api_key=api_key)
         response = client.messages.parse(
-            model="claude-opus-4-7",
+            model="claude-sonnet-4-6",
             max_tokens=4000,
             system=[{
                 "type": "text",
