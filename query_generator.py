@@ -116,6 +116,18 @@ class GeneratedTheme(BaseModel):
 class GeneratedConfig(BaseModel):
     title: str = Field(description="Brief title shown at top of the deliverable (e.g. 'AcmeFresh Weekly Brief').")
     subtitle: str = Field(description="Subtitle shown beneath title (e.g. 'Banneker Partners · Fresh produce supply chain market intel').")
+    anchor_terms: list[str] = Field(
+        description=(
+            "6-12 lowercase keywords/short phrases that we use as a POST-SCRAPE RELEVANCE FILTER. "
+            "Every news story's title must contain at least one of these terms or it gets dropped "
+            "before the user ever sees it. Include: (a) 3-5 industry-defining keywords from the "
+            "user's industry description in their narrowest form (e.g. 'fresh produce', 'produce traceability', "
+            "'grocery saas'), AND (b) every named competitor / named customer / named regulation the "
+            "user listed in specifics (e.g. 'producepay', 'crisp', 'afresh', 'silo', 'shelf engine'). "
+            "Be strict — if the term wouldn't show up in a headline about this industry, don't include it. "
+            "Skip generic event words (acquisition, funding, Series B) — those don't define industry relevance."
+        )
+    )
     themes: list[GeneratedTheme] = Field(
         description="One theme per enabled category, in priority order (breaches first if enabled, then competitive, then regulation, then others)."
     )
@@ -261,6 +273,17 @@ If the "Other" category is enabled but the Other-theme description is empty, ski
 - Title: "[Company Name] Weekly Brief"
 - Subtitle: "Banneker Partners · [short industry phrase] market intel"
 
+# ANCHOR TERMS (CRITICAL — your output `anchor_terms` list)
+
+You must also output `anchor_terms` — 6-12 lowercase keywords/short phrases used as a post-scrape relevance filter. After we fetch Google News results for your queries, we DROP any story whose title doesn't contain at least one anchor term. This is what saves us from "wholesale nicotine packets" and "blood sugar tracking" showing up because they happened to share words with a query.
+
+- Include the narrowest-form industry-defining keywords (e.g. for fresh produce SW: "fresh produce", "produce traceability", "produce software", "grocery saas", "agtech software")
+- Include every named competitor/customer/regulation from the user's specifics (e.g. "producepay", "crisp", "afresh", "shelf engine", "silo")
+- Don't include generic event words ("acquisition", "raises", "Series B") — those don't define industry relevance
+- Don't include words so common they'd let spam through ("technology", "software", "company" alone)
+
+Test: if I ran your anchor_terms against the title "Wholesale Nicotine Packets: Supply Chain Solutions [hashID] - stat.gov.pl", would any match? If yes, your anchors are too loose.
+
 Return ONLY the structured JSON — no preamble, no explanation."""
 
 
@@ -354,6 +377,7 @@ def generate_config(
         return {
             "title": cfg.title,
             "subtitle": cfg.subtitle,
+            "anchor_terms": [t.strip().lower() for t in cfg.anchor_terms if t.strip()],
             "themes": [{"name": t.name, "queries": t.queries} for t in cfg.themes],
         }
     except Exception as e:
@@ -392,20 +416,24 @@ def revise_config(
         for t in previous_config.get("themes", [])
     )
 
+    prev_anchors = previous_config.get("anchor_terms") or []
+    prev_anchors_text = ", ".join(prev_anchors) if prev_anchors else "(none generated yet)"
+
     revise_prompt = f"""{base_prompt}
 
 # PREVIOUS GENERATED CONFIG
-You generated the following themes and queries previously. The user has feedback below — REVISE the config based on their feedback. Keep what's good, change what they're asking you to change. Preserve the same number of themes (one per enabled category) and the same priority ordering. Aim for 8-15 queries per theme.
+You generated the following themes, queries, and anchor terms previously. The user has feedback below — REVISE the config based on their feedback. Keep what's good, change what they're asking you to change. Preserve the same number of themes (one per enabled category) and the same priority ordering. Aim for 8-15 queries per theme.
 
 Title: {previous_config.get('title', '')}
 Subtitle: {previous_config.get('subtitle', '')}
+Anchor terms: {prev_anchors_text}
 
 {prev_themes_text}
 
 # USER FEEDBACK (apply this to the revision)
 {feedback.strip()}
 
-Return the FULL revised config — title, subtitle, all themes, all queries. Apply the user's feedback throughout (not just to one theme). Re-check every query against the rules in your system prompt before returning."""
+Return the FULL revised config — title, subtitle, anchor_terms, all themes, all queries. Apply the user's feedback throughout (not just to one theme). Re-check every query against the rules in your system prompt before returning. Tighten anchor_terms if the user's feedback suggests irrelevant stories were getting through."""
 
     try:
         client = anthropic.Anthropic(api_key=api_key)
@@ -425,6 +453,7 @@ Return the FULL revised config — title, subtitle, all themes, all queries. App
         return {
             "title": cfg.title,
             "subtitle": cfg.subtitle,
+            "anchor_terms": [t.strip().lower() for t in cfg.anchor_terms if t.strip()],
             "themes": [{"name": t.name, "queries": t.queries} for t in cfg.themes],
         }
     except Exception as e:

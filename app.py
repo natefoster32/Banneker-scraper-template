@@ -237,8 +237,8 @@ def render_home():
 FORM_KEYS = [
     "form_name", "form_industry", "form_specifics", "form_other_description",
     "form_email", "form_frequency", "form_generated_title",
-    "form_generated_subtitle", "form_generated_themes", "form_lookback",
-    "form_revise_feedback",
+    "form_generated_subtitle", "form_generated_themes",
+    "form_generated_anchor_terms", "form_lookback", "form_revise_feedback",
 ]
 FORM_KEYS += [f"form_cat_{k}" for k in CATEGORY_DEFINITIONS.keys()]
 
@@ -259,6 +259,7 @@ def _seed_form_from_existing(cfg: dict):
     st.session_state["form_generated_title"] = cfg.get("title", "")
     st.session_state["form_generated_subtitle"] = cfg.get("subtitle", "")
     st.session_state["form_generated_themes"] = cfg.get("themes", [])
+    st.session_state["form_generated_anchor_terms"] = cfg.get("anchor_terms", [])
     st.session_state["form_lookback"] = cfg.get("lookback_days", 7)
     saved_cats = cfg.get("enabled_categories") or [k for k, v in CATEGORY_DEFINITIONS.items() if v["default"]]
     for cat_key in CATEGORY_DEFINITIONS.keys():
@@ -457,6 +458,7 @@ def render_create(edit_id: str | None = None):
                 st.session_state["form_generated_title"] = generated["title"]
                 st.session_state["form_generated_subtitle"] = generated["subtitle"]
                 st.session_state["form_generated_themes"] = generated["themes"]
+                st.session_state["form_generated_anchor_terms"] = generated.get("anchor_terms", [])
                 # Invalidate preview cache so the new themes get scraped fresh
                 for _k in ("preview_cache_key", "preview_grouped", "preview_total"):
                     st.session_state.pop(_k, None)
@@ -491,6 +493,7 @@ def render_create(edit_id: str | None = None):
             "title": (st.session_state.get("form_generated_title") or "").strip() or f"{name.strip()} Brief",
             "subtitle": (st.session_state.get("form_generated_subtitle") or "").strip(),
             "themes": st.session_state["form_generated_themes"],
+            "anchor_terms": st.session_state.get("form_generated_anchor_terms", []),
             "lookback_days": int(lookback),
             "show_top_news": True,
         }
@@ -555,6 +558,7 @@ def render_create(edit_id: str | None = None):
                         "title": st.session_state.get("form_generated_title", ""),
                         "subtitle": st.session_state.get("form_generated_subtitle", ""),
                         "themes": st.session_state["form_generated_themes"],
+                        "anchor_terms": st.session_state.get("form_generated_anchor_terms", []),
                     }
                     revised = revise_config(
                         previous_config=prev,
@@ -571,6 +575,7 @@ def render_create(edit_id: str | None = None):
                     st.session_state["form_generated_title"] = revised["title"]
                     st.session_state["form_generated_subtitle"] = revised["subtitle"]
                     st.session_state["form_generated_themes"] = revised["themes"]
+                    st.session_state["form_generated_anchor_terms"] = revised.get("anchor_terms", [])
                     st.session_state["form_revise_feedback"] = ""  # clear the field
                     for _k in ("preview_cache_key", "preview_grouped", "preview_total"):
                         st.session_state.pop(_k, None)
@@ -638,8 +643,8 @@ def render_create(edit_id: str | None = None):
         with save_cols[1]:
             if st.button("Discard & start over", key="discard_preview"):
                 for _k in ("form_generated_themes", "form_generated_title",
-                           "form_generated_subtitle", "preview_cache_key",
-                           "preview_grouped", "preview_total"):
+                           "form_generated_subtitle", "form_generated_anchor_terms",
+                           "preview_cache_key", "preview_grouped", "preview_total"):
                     st.session_state.pop(_k, None)
                 st.rerun()
 
@@ -676,6 +681,7 @@ def render_create(edit_id: str | None = None):
                 "enabled_categories": enabled_categories,
                 "title": gen_title.strip() or f"{name.strip()} Brief",
                 "subtitle": gen_subtitle.strip(),
+                "anchor_terms": st.session_state.get("form_generated_anchor_terms", []),
                 "themes": themes_to_save,
                 "lookback_days": int(lookback),
                 "show_top_news": True,

@@ -99,6 +99,73 @@ LOW_QUALITY_SOURCES = [
     "imdb", "yahoo finance", "the joplin globe",
 ]
 
+# Sources we hard-block — known SEO content farms, foreign-gov stats-site spam,
+# and other domains that consistently produce garbage matches in Google News RSS.
+HARD_BLOCK_SOURCES = [
+    "stat.gov.pl",        # Polish stats site abused for SEO content farming
+    "biuletyninformacyjny",
+    "stat.gov",           # any *.stat.gov.* that's not US/EU regulator we care about
+    "openpr.com",
+    "ein presswire",
+    "einpresswire",
+    "ein news",
+    "newschain",
+    "morningoverview",    # AI-content aggregator
+]
+
+# Title-level spam signatures. These almost always indicate SEO/scraped/generated content,
+# not real journalism. Cheaper to block at the title than to chase domain whack-a-mole.
+SPAM_TITLE_PATTERNS = [
+    r"\[[A-Za-z0-9_-]{6,}\]",                 # Random hash/ID in brackets — classic SEO spam
+    r"\bwholesale\s+\w+(?:\s+\w+){0,3}:\s+\w+(?:\s+\w+){0,3}\s+solutions?\b",  # "Wholesale X: Y Solutions" template
+    r"^\s*how\s+to\s+\w+",                    # "How to X" DIY/SEO content
+    r"\bbuy\s+[\w\s]+\s+(online|in\s+bulk)\b",
+    r"\bcheap\s+\w+(?:\s+\w+){0,2}\s+(for\s+sale|online)\b",
+    r"^\s*\d+\s+best\s+",                     # "5 Best X" listicles
+    r"\bproduct\s+review\b",
+    r"\bcoupon\s+code\b",
+    r"\b(?:vs\.?|versus)\s+[\w\s]{3,}\s*[-:]\s*which\s+is\s+(?:better|right)",  # "X vs Y: Which is better"
+]
+
+
+def is_spam_item(item: dict) -> bool:
+    """Hard block: drop items whose source/link/title clearly indicate spam,
+    SEO content farms, or AI-generated junk. Cheaper than a relevance pass."""
+    title = item.get("title") or ""
+    source = (item.get("source") or "").lower()
+    link = (item.get("link") or "").lower()
+    for s in HARD_BLOCK_SOURCES:
+        if s in source or s in link:
+            return True
+    for pat in SPAM_TITLE_PATTERNS:
+        if re.search(pat, title, re.IGNORECASE):
+            return True
+    return False
+
+
+def passes_relevance_filter(title: str, anchor_terms: list[str]) -> bool:
+    """Return True if title contains at least one industry-anchor term.
+    This is what catches loose Google News matches that share keywords but
+    aren't actually about the user's industry. If no anchor_terms (back-compat
+    for old configs), pass everything through."""
+    if not anchor_terms:
+        return True
+    low = title.lower()
+    return any(t in low for t in anchor_terms if t)
+
+
+# Recognized news outlets — small score bonus, helps surface real journalism
+# above blog/aggregator noise even when both pass our hard filters.
+TIER_ONE_SOURCES = [
+    "bloomberg", "reuters", "wall street journal", "wsj", "financial times", "ft.com",
+    "the new york times", "nyt", "washington post", "the economist",
+    "techcrunch", "the information", "axios", "pitchbook", "crunchbase news",
+    "fortune", "forbes", "barron", "cnbc", "marketwatch",
+    "associated press", "ap news", "bbc",
+    "the verge", "wired", "ars technica", "protocol", "stratechery",
+    "the wall street journal",
+]
+
 
 def is_news_story(title: str) -> bool:
     low = title.lower()
@@ -122,6 +189,8 @@ def news_score(item: dict, theme_idx: int, total_themes: int, lookback_days: int
     src = (item.get("source") or "").lower()
     if any(s in src for s in LOW_QUALITY_SOURCES):
         score *= 0.4
+    if any(s in src for s in TIER_ONE_SOURCES):
+        score *= 1.35
     return score
 
 
@@ -129,6 +198,10 @@ def pick_top_stories(grouped: dict, theme_order: list[str], n: int, lookback_day
     scored: list[tuple[dict, str, float]] = []
     for theme_idx, theme in enumerate(theme_order):
         for it in grouped.get(theme, []):
+            # Defense in depth — scrape_for_config should already have filtered these,
+            # but old cached configs may have unfiltered stories.
+            if is_spam_item(it):
+                continue
             if not is_news_story(it["title"]):
                 continue
             scored.append((it, theme, news_score(it, theme_idx, len(theme_order), lookback_days)))
@@ -179,10 +252,19 @@ def fetch_rss(query: str) -> list[dict]:
 
 def scrape_for_config(config: dict) -> tuple[dict, int]:
     """Run scraping for a single tracker config. Returns (grouped, total)
-    where grouped is {theme_name: [items]} in theme order."""
+    where grouped is {theme_name: [items]} in theme order.
+
+    Filter pipeline (in order):
+      1. Hard block — known spam domains + spam-title patterns. Drop.
+      2. NON_NEWS_PATTERNS — webinars, whitepapers, earnings, listicles. Drop.
+      3. Relevance gate — title must contain at least one anchor_term. Drop.
+      4. (Scoring layer applied later: tier-1 source bonus, low-quality penalty.)
+    """
     lookback_days = int(config.get("lookback_days", 7))
     cutoff = datetime.now(timezone.utc) - timedelta(days=lookback_days)
     themes = config.get("themes", [])
+    # Anchor terms used as a post-scrape relevance filter. Normalize lowercase.
+    anchor_terms = [t.strip().lower() for t in (config.get("anchor_terms") or []) if t.strip()]
     grouped: dict[str, list[dict]] = {}
     seen_links: set[str] = set()
     seen_titles: set[str] = set()
@@ -202,7 +284,14 @@ def scrape_for_config(config: dict) -> tuple[dict, int]:
                 title_key = it["title"].lower()[:120]
                 if title_key in seen_titles:
                     continue
+                # Layer 1: hard block spam (domain + title patterns)
+                if is_spam_item(it):
+                    continue
+                # Layer 2: format filter (webinars/earnings/etc.)
                 if not is_news_story(it["title"]):
+                    continue
+                # Layer 3: relevance gate — must contain an anchor term
+                if not passes_relevance_filter(it["title"], anchor_terms):
                     continue
                 seen_links.add(it["link"])
                 seen_titles.add(title_key)
