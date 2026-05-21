@@ -141,14 +141,23 @@ def render_footer():
     )
 
 
+LOGO_PATH = "assets/banneker-logo.png"
+
+
 def render_masthead(title: str, subtitle: str = ""):
+    # Banneker logo above the navy rule
+    try:
+        st.image(LOGO_PATH, width=180)
+    except Exception:
+        pass
+
     sub_html = (
         f"<div style='color:{PERIWINKLE}; font-weight:700; font-size:13px; letter-spacing:1.5px; text-transform:uppercase; margin-bottom:14px;'>{subtitle}</div>"
         if subtitle else ""
     )
     st.markdown(
         f"""
-        <div style='border-top:4px solid {NAVY}; padding-top:18px; margin-bottom:8px;'></div>
+        <div style='border-top:4px solid {NAVY}; padding-top:18px; margin-bottom:8px; margin-top:14px;'></div>
         <h1 style='color:{NAVY}; font-weight:800; font-size:38px; line-height:1.1; margin:0 0 6px 0; letter-spacing:-0.5px;'>{title}</h1>
         {sub_html}
         """,
@@ -280,7 +289,7 @@ def render_create(edit_id: str | None = None):
     industry = st.text_input(
         "Industry / market",
         value=st.session_state.get("form_industry", ""),
-        placeholder="e.g., OT cybersecurity software for utilities, oil & gas, and manufacturing operators",
+        placeholder="e.g., OT security for critical infrastructure",
         key="form_industry",
         label_visibility="collapsed",
     )
@@ -289,7 +298,7 @@ def render_create(edit_id: str | None = None):
     st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>3. What to track</h3>", unsafe_allow_html=True)
     st.markdown(
         f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:10px;'>"
-        "The first four are pre-checked. Uncheck what you don't need, check what you do."
+        "The first three are pre-checked as sensible defaults. Uncheck what you don't need, check what you do. Tick \"Other\" if you want a custom theme — describe it in the specifics field below."
         "</div>",
         unsafe_allow_html=True,
     )
@@ -302,10 +311,11 @@ def render_create(edit_id: str | None = None):
             enabled_categories.append(cat_key)
 
     # --- Question 4: Specifics (optional) ---
-    st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>4. Anything specific to call out? (optional)</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>4. Anything special to call out or cover? (optional)</h3>", unsafe_allow_html=True)
     st.markdown(
         f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:8px;'>"
-        "Named competitors, specific regions/countries, specific regulations, or named customers. "
+        "Named competitors, specific regions/countries, specific regulations, named customers, "
+        "or — if you ticked \"Other\" above — a description of the custom theme you want tracked. "
         "Claude uses these as named-entity queries within the themes above."
         "</div>",
         unsafe_allow_html=True,

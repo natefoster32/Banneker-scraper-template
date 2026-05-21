@@ -426,9 +426,14 @@ def build_email_html(grouped: dict, theme_order: list[str], total: int,
         if subtitle else ""
     )
 
+    logo_url = "https://raw.githubusercontent.com/natefoster32/Banneker-scraper-template/main/assets/banneker-logo.png"
+
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"></head>
 <body style="font-family: Inter, Calibri, 'Segoe UI', Arial, sans-serif; color:{BODY_GREY}; background:#FFFFFF; max-width:720px; margin:0 auto; padding:32px 28px 48px; font-size:15px; line-height:1.5;">
+  <div style='margin-bottom:18px;'>
+    <img src='{logo_url}' alt='Banneker Partners' width='180' style='display:block; max-width:180px; height:auto;'>
+  </div>
   <div style='border-top:4px solid {NAVY}; padding-top:18px; margin-bottom:8px;'></div>
   <h1 style='color:{NAVY}; font-weight:800; font-size:34px; line-height:1.1; margin:0 0 6px 0; letter-spacing:-0.5px;'>{_html.escape(title)}</h1>
   {subtitle_html}

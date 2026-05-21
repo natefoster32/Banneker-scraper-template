@@ -30,6 +30,7 @@ def get_anthropic_key() -> str:
 
 # Pre-built theme categories the user picks from via checkboxes.
 # Each carries the guidance Claude uses when generating queries for it.
+# Ordered so the default-checked categories come first in the UI.
 CATEGORY_DEFINITIONS = {
     "competitive": {
         "label": "Competitive moves — M&A, funding, partnerships",
@@ -41,9 +42,30 @@ CATEGORY_DEFINITIONS = {
             "named-competitor queries from the user's specifics."
         ),
     },
+    "customer_wins": {
+        "label": "Customer wins & deployments",
+        "default": True,
+        "guidance": (
+            "Named-customer wins, deployments, contracts, RFP results. Use event verbs "
+            "(selects, deploys, signs, wins, partners with) plus vertical/customer-type "
+            "qualifiers."
+        ),
+    },
+    "industry_news": {
+        "label": "Industry news & regulatory landscape",
+        "default": True,
+        "guidance": (
+            "General industry news: market developments, demand shifts, infrastructure "
+            "investment, major customer/end-market trends, AND the regulatory landscape "
+            "(policy direction, agency rule-makings, legislative pushes, court rulings) "
+            "shaping the industry. Broader than the 'Regulation' category — focus on "
+            "narrative/landscape news that frames the market, not just discrete enforcement "
+            "actions. Mix vertical-qualified event queries with named-policy/named-agency queries."
+        ),
+    },
     "breaches": {
         "label": "Breaches & security incidents",
-        "default": True,
+        "default": False,
         "guidance": (
             "Cyberattacks, ransomware, data breaches, exploits, vulnerabilities affecting "
             "the industry. These often double as FUD content for sales/marketing. Use "
@@ -52,22 +74,15 @@ CATEGORY_DEFINITIONS = {
         ),
     },
     "regulation": {
-        "label": "Regulatory & compliance updates",
-        "default": True,
+        "label": "Specific regulations & enforcement actions",
+        "default": False,
         "guidance": (
-            "New regulations, enforcement actions, fines, agency advisories, compliance "
-            "deadlines. Name the actual regulations and agencies in queries (e.g. 'NIS2 "
-            "directive enforcement', 'FDA 510k clearance', 'CFPB enforcement'), not generic "
-            "phrases like 'cybersecurity regulation'."
-        ),
-    },
-    "customer_wins": {
-        "label": "Customer wins & deployments",
-        "default": True,
-        "guidance": (
-            "Named-customer wins, deployments, contracts, RFP results. Use event verbs "
-            "(selects, deploys, signs, wins, partners with) plus vertical/customer-type "
-            "qualifiers."
+            "Discrete enforcement actions, fines, named-regulation rule-makings, agency "
+            "advisories, compliance deadlines. Name the actual regulations and agencies in "
+            "queries (e.g. 'NIS2 directive enforcement', 'FDA 510k clearance', 'CFPB "
+            "enforcement'), not generic phrases like 'cybersecurity regulation'. Use this "
+            "category when the user cares about specific named regulations they comply with; "
+            "use 'Industry news & regulatory landscape' for broader policy-direction news."
         ),
     },
     "product_launches": {
@@ -93,6 +108,17 @@ CATEGORY_DEFINITIONS = {
         "guidance": (
             "Executive hires and departures at competitors and named portco. Use event "
             "verbs (appoints, hires, names CEO, departs, joins) plus role qualifiers."
+        ),
+    },
+    "other": {
+        "label": "Other (describe in the specifics field below)",
+        "default": False,
+        "guidance": (
+            "User-defined theme. READ THE SPECIFICS FIELD to identify what topic the user "
+            "wants tracked, then build a theme name and 8-15 queries around it. Apply the "
+            "same principles: broad event queries + named-entity queries, strong event verbs, "
+            "avoid market-report phrasing. If the specifics field is empty or doesn't suggest "
+            "a clear topic, skip this theme entirely (don't fabricate one)."
         ),
     },
 }
@@ -168,15 +194,19 @@ Talent: appoints, hires, joins, departs, resigns, names CEO
 # OUTPUT STRUCTURE
 
 Return one theme per enabled category, in this priority order if applicable:
-1. Breaches & incidents (highest signal for FUD/sales material)
+1. Breaches & incidents (highest signal for FUD/sales material — only if enabled)
 2. Competitive (M&A, raises, partnerships)
-3. Regulation
-4. Customer wins
-5. Product launches
-6. Geographic
-7. Talent
+3. Industry news & regulatory landscape
+4. Specific regulations & enforcement actions
+5. Customer wins
+6. Product launches
+7. Geographic
+8. Talent
+9. Other (user-defined from specifics)
 
 Each theme should have 8-15 queries. Mix broad event queries with named-entity queries pulled from the user's specifics (if provided).
+
+If the "Other" category is enabled but the specifics field doesn't suggest a clear topic for it, skip that theme — don't fabricate one.
 
 # TITLE/SUBTITLE
 
