@@ -45,8 +45,20 @@ st.set_page_config(
 st.markdown(f"""
 <style>
   .stApp {{ background: #FFFFFF; }}
-  html, body, [class*="css"], [class*="st-"] {{
-    font-family: Inter, Calibri, "Segoe UI", Arial, sans-serif !important;
+  /* Scope the Inter override so Material Icons / Material Symbols fonts on
+     icon spans aren't clobbered (they need their own font-family to render
+     as glyphs instead of literal text like "_arrow_right"). */
+  html, body, .stApp, .stApp p, .stApp li, .stApp h1, .stApp h2, .stApp h3,
+  .stApp h4, .stApp h5, .stApp h6, .stApp label, .stApp button, .stApp input,
+  .stApp textarea, .stApp select, .stApp div[data-testid="stMarkdownContainer"],
+  .stApp div[data-testid="stMarkdownContainer"] * {{
+    font-family: Inter, Calibri, "Segoe UI", Arial, sans-serif;
+  }}
+  /* Restore icon fonts on Material Icons / Symbols elements. */
+  .material-icons, .material-symbols-outlined, .material-symbols-rounded,
+  [class*="material-symbols"], [class*="MuiIcon"], [class*="iconContainer"] *,
+  span[data-baseweb="icon"], span[data-baseweb="icon"] * {{
+    font-family: 'Material Symbols Outlined', 'Material Icons', 'Material Symbols Rounded' !important;
   }}
   h1, h1 *, h2, h2 *, h3, h3 *,
   [data-testid="stMarkdownContainer"] h1,
@@ -396,30 +408,29 @@ def render_create(edit_id: str | None = None):
         "</div>",
         unsafe_allow_html=True,
     )
-    cols = st.columns([3, 2])
-    with cols[0]:
-        email = st.text_input(
-            "Your email",
-            placeholder="you@banneker.com",
-            key="form_email",
-        )
-    with cols[1]:
-        freq_options = ["none", "weekly_monday", "weekly_friday", "daily"]
-        freq_labels = {
-            "none": "Don't email me",
-            "weekly_monday": "Weekly · Monday",
-            "weekly_friday": "Weekly · Friday",
-            "daily": "Daily",
-        }
-        # Defensive: if something corrupted form_frequency, snap it back to a valid value.
-        if st.session_state.get("form_frequency") not in freq_options:
-            st.session_state["form_frequency"] = "none"
-        frequency = st.selectbox(
-            "Frequency",
-            options=freq_options,
-            format_func=lambda v: freq_labels[v],
-            key="form_frequency",
-        )
+    email = st.text_input(
+        "Your email",
+        placeholder="you@banneker.com",
+        key="form_email",
+    )
+    freq_options = ["none", "weekly_monday", "weekly_friday", "daily"]
+    freq_labels = {
+        "none": "Don't email me",
+        "weekly_monday": "Weekly · Monday",
+        "weekly_friday": "Weekly · Friday",
+        "daily": "Daily",
+    }
+    # Defensive: if something corrupted form_frequency, snap it back to a valid value.
+    if st.session_state.get("form_frequency") not in freq_options:
+        st.session_state["form_frequency"] = "none"
+    # Radio (not selectbox) — radios can't be browser-autofilled with email text.
+    frequency = st.radio(
+        "Frequency",
+        options=freq_options,
+        format_func=lambda v: freq_labels[v],
+        key="form_frequency",
+        horizontal=True,
+    )
 
     # --- Generate preview button ---
     st.markdown("---")
@@ -735,24 +746,27 @@ def render_view(tracker_id: str):
                 unsafe_allow_html=True,
             )
             existing_sub = config.get("email_subscription") or {}
+            if "sub_email" not in st.session_state:
+                st.session_state["sub_email"] = existing_sub.get("email", "")
+            sub_freq_options = ["weekly_monday", "weekly_friday", "daily"]
+            if st.session_state.get("sub_freq") not in sub_freq_options:
+                st.session_state["sub_freq"] = existing_sub.get("frequency", "weekly_monday")
             email = st.text_input(
                 "Your email",
-                value=existing_sub.get("email", ""),
                 placeholder="you@banneker.com",
                 key="sub_email",
             )
-            freq = st.selectbox(
+            # Radio (not selectbox) — avoids browser autofilling email text into the dropdown.
+            freq = st.radio(
                 "Frequency",
-                options=["weekly_monday", "weekly_friday", "daily"],
-                index=["weekly_monday", "weekly_friday", "daily"].index(
-                    existing_sub.get("frequency", "weekly_monday")
-                ),
+                options=sub_freq_options,
                 format_func=lambda v: {
                     "weekly_monday": "Weekly · Monday morning",
                     "weekly_friday": "Weekly · Friday morning",
                     "daily": "Daily · 6am UTC",
                 }[v],
                 key="sub_freq",
+                horizontal=True,
             )
             cols = st.columns([1, 1, 4])
             with cols[0]:

@@ -170,6 +170,25 @@ Talent: appoints, hires, joins, departs, resigns, names CEO
 - For competitors: name them individually as separate queries
 - For verticals: use vertical qualifiers ("utility cyberattack", "manufacturing ransomware"), not the bare category
 
+## 5. EVERY query MUST include an industry-anchor term. (Critical.)
+
+Google News RSS does loose token matching — a query like "agtech Series B funding" will return ANY tech-sector Series B story where the words happen to appear nearby. The result: a produce-tech tracker pulls semiconductor or food-delivery M&A news.
+
+To prevent this, every single query — broad event queries AND named-entity queries — must contain at least one tight industry-anchor word or phrase that uniquely identifies this industry. Generic event words (acquisition, Series B, M&A, funding, raises) cannot stand alone.
+
+For each tracker, first pick 2-4 industry-anchor terms from the user's industry description. These are the words a journalist writing about THIS industry would actually use. Then ensure every query contains at least one of them.
+
+- BAD (produce-tech tracker): "agtech Series B funding"  →  "agtech" is too loose; matches drone, livestock, and food-delivery startups
+- GOOD: "fresh produce software Series B", "produce traceability funding", "grocery supply chain SaaS raises"
+
+- BAD (OT cyber tracker): "industrial cybersecurity acquisition"  →  the words "industrial" and "cybersecurity" rarely co-occur in actual headlines
+- GOOD: "OT cybersecurity acquisition", "ICS security vendor acquired", "operational technology security M&A"
+
+- BAD (healthcare RCM tracker): "RCM acquisition"  →  "RCM" alone is too short, will match unrelated acronyms
+- GOOD: "revenue cycle management acquisition", "healthcare RCM acquisition", "medical billing software acquired"
+
+The test for each query: "If I read three loose interpretations of the words in this query, would they all be about the user's industry?" If no, add an anchor term.
+
 # OUTPUT STRUCTURE
 
 Return one theme per enabled category, in this priority order if applicable:
@@ -219,7 +238,9 @@ def _build_user_prompt(company_name: str, industry: str, enabled_categories: lis
 # USER-PROVIDED SPECIFICS (incorporate as named-entity queries within the relevant themes)
 {specifics_block}{other_block}
 
-Generate the structured tracker config now. Remember: news-only (avoid market-report queries), mix broad event queries with named queries, use strong event verbs, 8-15 queries per theme."""
+Before generating queries, internally identify 2-4 INDUSTRY-ANCHOR TERMS from the industry description above — the words a journalist actually writing about this industry would use in a headline. Every single query you generate must contain at least one anchor term. If you find yourself writing a query with only generic event words (acquisition, Series B, M&A, raises), add an anchor.
+
+Generate the structured tracker config now. Remember: news-only (avoid market-report queries), mix broad event queries with named queries, use strong event verbs, every query must include an industry-anchor term, 8-15 queries per theme."""
 
 
 def generate_config(
