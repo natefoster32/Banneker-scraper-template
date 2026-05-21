@@ -445,25 +445,23 @@ def render_create(edit_id: str | None = None):
                 st.session_state["form_generated_title"] = generated["title"]
                 st.session_state["form_generated_subtitle"] = generated["subtitle"]
                 st.session_state["form_generated_themes"] = generated["themes"]
+                # Invalidate preview cache so the new themes get scraped fresh
+                for _k in ("preview_cache_key", "preview_grouped", "preview_total"):
+                    st.session_state.pop(_k, None)
                 st.rerun()
 
-    # --- Preview / edit generated themes ---
+    # --- Preview: sample email + save/revise actions ---
     if has_generated:
         st.markdown(
-            f"<div style='margin-top:32px;'><h3 style='color:{NAVY};'>Preview</h3>"
-            f"<div style='color:{MID_GREY}; font-size:13px;'>Claude generated the structure below. "
-            f"Tweak any field if you want, then click Save.</div></div>",
+            f"<div style='margin-top:32px;'><h3 style='color:{NAVY};'>Sample brief preview</h3>"
+            f"<div style='color:{MID_GREY}; font-size:13px;'>Here's what this week's email would look like. "
+            f"If something's missing or off, edit the inputs above and click Generate again. "
+            f"Otherwise click Save below.</div></div>",
             unsafe_allow_html=True,
         )
 
-        gen_title = st.text_input(
-            "Brief title",
-            key="form_generated_title",
-        )
-        gen_subtitle = st.text_input(
-            "Subtitle",
-            key="form_generated_subtitle",
-        )
+        gen_title = st.text_input("Brief title", key="form_generated_title")
+        gen_subtitle = st.text_input("Subtitle", key="form_generated_subtitle")
         if st.session_state.get("form_lookback") not in [3, 7, 14, 30]:
             st.session_state["form_lookback"] = 7
         lookback = st.selectbox(
@@ -473,50 +471,127 @@ def render_create(edit_id: str | None = None):
             key="form_lookback",
         )
 
-        st.markdown(f"<h4 style='color:{NAVY}; margin-top:20px;'>Themes &amp; queries</h4>", unsafe_allow_html=True)
-        themes = st.session_state["form_generated_themes"]
-        edited_themes = []
-        for i, theme in enumerate(themes):
-            st.markdown(
-                f"<div style='background:{ICE_BLUE}; padding:10px 14px; border-radius:3px; margin-top:14px; margin-bottom:4px; border-left:3px solid {NAVY};'>"
-                f"<div style='color:{NAVY}; font-weight:700; font-size:11px; letter-spacing:1.2px; text-transform:uppercase;'>Theme {i+1:02d}</div>"
-                f"</div>",
-                unsafe_allow_html=True,
+        # Build a temporary config and scrape it. Cache by config hash so we
+        # don't re-scrape on every rerun (e.g. clicking inside a text field).
+        preview_config = {
+            "id": "preview",
+            "name": name.strip() or "Preview",
+            "title": (st.session_state.get("form_generated_title") or "").strip() or f"{name.strip()} Brief",
+            "subtitle": (st.session_state.get("form_generated_subtitle") or "").strip(),
+            "themes": st.session_state["form_generated_themes"],
+            "lookback_days": int(lookback),
+            "show_top_news": True,
+        }
+        preview_key = config_hash(preview_config)
+        if st.session_state.get("preview_cache_key") != preview_key:
+            with st.spinner("Pulling sample stories (~20-40 seconds)..."):
+                try:
+                    grouped, total = scrape_for_config(preview_config)
+                except Exception as e:
+                    st.error(f"Scrape failed: {e}")
+                    grouped, total = {}, 0
+            st.session_state["preview_grouped"] = grouped
+            st.session_state["preview_total"] = total
+            st.session_state["preview_cache_key"] = preview_key
+
+        grouped = st.session_state.get("preview_grouped", {})
+        total = st.session_state.get("preview_total", 0)
+        theme_order = [t["name"] for t in preview_config["themes"] if t.get("name")]
+        try:
+            email_html = build_email_html(grouped, theme_order, total, preview_config, unsubscribe_url=None)
+        except Exception as e:
+            email_html = f"<p style='color:#900'>Preview render failed: {e}</p>"
+
+        # Render the email HTML inside an iframe so its inline styles aren't
+        # stripped or fought by the page's own CSS.
+        import streamlit.components.v1 as components
+        components.html(email_html, height=900, scrolling=True)
+
+        st.markdown(
+            f"<div style='color:{MID_GREY}; font-size:12px; margin-top:6px;'>"
+            f"Preview shows actual stories from Google News for the queries Claude generated. "
+            f"{total} stories pulled across {len(theme_order)} themes."
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+        # Power-user fallback: manual theme/query editing
+        with st.expander("Advanced: edit themes & queries manually"):
+            st.caption(
+                "You usually shouldn't need this — if the preview is off, edit the inputs "
+                "above and click Generate again. But if you want to hand-tune the queries, you can."
             )
-            t_name = st.text_input("Theme name", value=theme["name"], key=f"theme_name_{i}",
-                                   label_visibility="collapsed")
-            t_queries = st.text_area(
-                "Queries (one per line)",
-                value="\n".join(theme["queries"]),
-                key=f"theme_queries_{i}",
-                height=110,
-            )
-            ctrl_cols = st.columns([1, 1, 6])
-            with ctrl_cols[0]:
-                if st.button("↑", key=f"up_{i}", disabled=(i == 0)):
-                    themes[i], themes[i-1] = themes[i-1], themes[i]
-                    st.session_state["form_generated_themes"] = themes
+            themes = st.session_state["form_generated_themes"]
+            edited_themes = []
+            for i, theme in enumerate(themes):
+                st.markdown(
+                    f"<div style='background:{ICE_BLUE}; padding:8px 12px; border-radius:3px; margin-top:10px; margin-bottom:4px; border-left:3px solid {NAVY};'>"
+                    f"<div style='color:{NAVY}; font-weight:700; font-size:11px; letter-spacing:1.2px; text-transform:uppercase;'>Theme {i+1:02d}</div>"
+                    f"</div>",
+                    unsafe_allow_html=True,
+                )
+                t_name = st.text_input("Theme name", value=theme["name"], key=f"theme_name_{i}",
+                                       label_visibility="collapsed")
+                t_queries = st.text_area(
+                    "Queries (one per line)",
+                    value="\n".join(theme["queries"]),
+                    key=f"theme_queries_{i}",
+                    height=110,
+                )
+                ctrl_cols = st.columns([1, 1, 1, 5])
+                with ctrl_cols[0]:
+                    if st.button("↑", key=f"up_{i}", disabled=(i == 0)):
+                        themes[i], themes[i-1] = themes[i-1], themes[i]
+                        st.session_state["form_generated_themes"] = themes
+                        st.session_state.pop("preview_cache_key", None)
+                        st.rerun()
+                with ctrl_cols[1]:
+                    if st.button("↓", key=f"down_{i}", disabled=(i == len(themes) - 1)):
+                        themes[i], themes[i+1] = themes[i+1], themes[i]
+                        st.session_state["form_generated_themes"] = themes
+                        st.session_state.pop("preview_cache_key", None)
+                        st.rerun()
+                with ctrl_cols[2]:
+                    if st.button("Remove", key=f"del_{i}"):
+                        themes.pop(i)
+                        st.session_state["form_generated_themes"] = themes
+                        st.session_state.pop("preview_cache_key", None)
+                        st.rerun()
+                edited_themes.append({
+                    "name": t_name.strip(),
+                    "queries": [q.strip() for q in t_queries.split("\n") if q.strip()],
+                })
+            if st.button("Apply manual edits & refresh preview", key="apply_manual"):
+                # Push edited themes back into the generated state so the preview re-scrapes
+                valid = [t for t in edited_themes if t["name"] and t["queries"]]
+                if valid:
+                    st.session_state["form_generated_themes"] = valid
+                    st.session_state.pop("preview_cache_key", None)
                     st.rerun()
-            with ctrl_cols[1]:
-                if st.button("↓", key=f"down_{i}", disabled=(i == len(themes) - 1)):
-                    themes[i], themes[i+1] = themes[i+1], themes[i]
-                    st.session_state["form_generated_themes"] = themes
-                    st.rerun()
-            with ctrl_cols[2]:
-                if st.button("Remove", key=f"del_{i}"):
-                    themes.pop(i)
-                    st.session_state["form_generated_themes"] = themes
-                    st.rerun()
-            edited_themes.append({
-                "name": t_name.strip(),
-                "queries": [q.strip() for q in t_queries.split("\n") if q.strip()],
-            })
 
         st.markdown("---")
-        if st.button("Save tracker" if not existing else "Update tracker",
-                     type="primary", key="save_tracker"):
-            valid_themes = [t for t in edited_themes if t["name"] and t["queries"]]
-            if not valid_themes:
+        save_cols = st.columns([2, 2, 4])
+        with save_cols[0]:
+            do_save = st.button("Save tracker" if not existing else "Update tracker",
+                                type="primary", key="save_tracker")
+        with save_cols[1]:
+            if st.button("Discard & start over", key="discard_preview"):
+                for _k in ("form_generated_themes", "form_generated_title",
+                           "form_generated_subtitle", "preview_cache_key",
+                           "preview_grouped", "preview_total"):
+                    st.session_state.pop(_k, None)
+                st.rerun()
+
+        if do_save:
+            # Source of truth for themes is whatever's in session_state (Claude's output
+            # by default, or manual edits if the user applied them).
+            themes_to_save = [
+                {"name": t.get("name", "").strip(),
+                 "queries": [q.strip() for q in t.get("queries", []) if q.strip()]}
+                for t in st.session_state["form_generated_themes"]
+                if t.get("name") and t.get("queries")
+            ]
+            if not themes_to_save:
                 st.error("Need at least one theme with at least one query.")
                 return
 
@@ -540,7 +615,7 @@ def render_create(edit_id: str | None = None):
                 "enabled_categories": enabled_categories,
                 "title": gen_title.strip() or f"{name.strip()} Brief",
                 "subtitle": gen_subtitle.strip(),
-                "themes": valid_themes,
+                "themes": themes_to_save,
                 "lookback_days": int(lookback),
                 "show_top_news": True,
                 "show_download": True,
@@ -555,6 +630,8 @@ def render_create(edit_id: str | None = None):
                 return
 
             _clear_form_state()
+            for _k in ("preview_cache_key", "preview_grouped", "preview_total"):
+                st.session_state.pop(_k, None)
             st.success("Saved. Redirecting to your tracker...")
             st.query_params.clear()
             st.query_params.update({"id": tracker_id})
