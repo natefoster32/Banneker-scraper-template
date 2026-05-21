@@ -57,6 +57,25 @@ NON_NEWS_PATTERNS = [
     r"\bopinion:\s*",
     r"\bcommentary:\s*",
     r"\bcolumn:\s*",
+    # Earnings/analyst noise — usually auto-generated 10-Q digests, not real news
+    r"\bq[1-4]\s+\d{4}\s+(earnings|results|report|review)\b",
+    r"\b[1-4]q\s*\d{2,4}\s+(earnings|results|review|summary)\b",
+    r"\b10-?q\s+(summary|filing|review)\b",
+    r"\bearnings\s+(beat|miss|preview|recap|call)\b",
+    r"\beps\s+\$",
+    r"\brevenue\s+\$[\d.,nm/a]+\s*,?\s*eps\b",
+    r"\b(community|momentum)\s+(chart\s+signals|stocks)\b",
+    r"\b(price|stock)\s+target\b",
+    r"\banalyst(?:s)?\s+(downgrade|upgrade|rating|coverage)\b",
+    r"\bdowngraded?\s+to\s+",
+    r"\bupgraded?\s+to\s+",
+    # IPO-tracker / startup-list listicles (vs. actual IPO news)
+    r"\bipo\s+tracker\b",
+    r"\b(startup|funding|deal)\s+(tracker|roundup|recap|digest)\b",
+    r"\bweekly\s+(funding|deal|startup)\b",
+    # Generic market-report leftovers
+    r"\bmarket\s+(size|share|forecast|outlook|analysis|research)\b",
+    r"\b(cagr|forecast\s+period)\b",
 ]
 
 NEWS_SIGNAL_WORDS = [

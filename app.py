@@ -30,7 +30,7 @@ from core import (
 )
 from core import build_email_html
 from email_sender import send_email
-from query_generator import CATEGORY_DEFINITIONS, generate_config, get_anthropic_key
+from query_generator import CATEGORY_DEFINITIONS, generate_config, get_anthropic_key, revise_config
 from storage import delete_config, get_config, load_all_configs, upsert_config
 
 # ---------- Page setup ----------
@@ -238,6 +238,7 @@ FORM_KEYS = [
     "form_name", "form_industry", "form_specifics", "form_other_description",
     "form_email", "form_frequency", "form_generated_title",
     "form_generated_subtitle", "form_generated_themes", "form_lookback",
+    "form_revise_feedback",
 ]
 FORM_KEYS += [f"form_cat_{k}" for k in CATEGORY_DEFINITIONS.keys()]
 
@@ -525,6 +526,55 @@ def render_create(edit_id: str | None = None):
             f"</div>",
             unsafe_allow_html=True,
         )
+
+        # --- Conversational revise loop ---
+        st.markdown(
+            f"<div style='margin-top:20px;'>"
+            f"<div style='color:{NAVY}; font-weight:700; font-size:14px; margin-bottom:4px;'>Not quite right? Tell Claude how to revise.</div>"
+            f"<div style='color:{MID_GREY}; font-size:12px; margin-bottom:6px;'>"
+            f"e.g. \"focus only on fresh produce, not general food supply chain\", "
+            f"\"drop earnings reports\", "
+            f"\"add more queries on named LMM produce-software competitors\"."
+            f"</div>"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+        feedback = st.text_area(
+            "Revision feedback",
+            key="form_revise_feedback",
+            placeholder="What's off about the queries? What should Claude change?",
+            height=80,
+            label_visibility="collapsed",
+        )
+        if st.button("Revise & regenerate", key="revise_btn"):
+            if not feedback.strip():
+                st.warning("Type some feedback first.")
+            else:
+                with st.spinner("Claude is revising your queries (~10-20 seconds)..."):
+                    prev = {
+                        "title": st.session_state.get("form_generated_title", ""),
+                        "subtitle": st.session_state.get("form_generated_subtitle", ""),
+                        "themes": st.session_state["form_generated_themes"],
+                    }
+                    revised = revise_config(
+                        previous_config=prev,
+                        feedback=feedback,
+                        company_name=name,
+                        industry_description=industry,
+                        enabled_categories=enabled_categories,
+                        specifics=specifics,
+                        other_description=other_description,
+                    )
+                if revised is None:
+                    st.error("Revision failed. Check the Claude API key / credit and try again.")
+                else:
+                    st.session_state["form_generated_title"] = revised["title"]
+                    st.session_state["form_generated_subtitle"] = revised["subtitle"]
+                    st.session_state["form_generated_themes"] = revised["themes"]
+                    st.session_state["form_revise_feedback"] = ""  # clear the field
+                    for _k in ("preview_cache_key", "preview_grouped", "preview_total"):
+                        st.session_state.pop(_k, None)
+                    st.rerun()
 
         # Power-user fallback: manual theme/query editing
         with st.expander("Advanced: edit themes & queries manually"):

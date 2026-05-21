@@ -267,13 +267,15 @@ def _build_user_prompt(company_name: str, industry: str, enabled_categories: lis
 {specifics_block}{other_block}
 
 Before generating queries:
-1. Internally identify 2-4 INDUSTRY-ANCHOR TERMS from the industry description above — the words a journalist actually writing about this industry would use in a headline.
+1. Internally identify 2-4 INDUSTRY-ANCHOR TERMS from the industry description above — the words a journalist actually writing about this industry would use in a headline. USE THE NARROWEST FORM the user gave you, not a broader generalization. "Fresh produce supply chain" must NOT become "food supply chain" or "supply chain"; "OT cybersecurity for utilities" must NOT become "industrial cybersecurity". The narrower form is what the user meant.
 2. Identify whether this is an inherently-digital industry (cyber, fintech, AI) or a physical industry with a software sub-segment (food, healthcare, energy, industrials).
 3. For physical-industry trackers, pick 1-2 SOFTWARE-QUALIFIER terms (software, SaaS, platform, technology, etc.) that you will pair with the industry anchor.
 
-Every single non-regulatory query must contain BOTH an industry anchor AND (for physical-industry trackers) a software qualifier. If you find yourself writing "HEB acquisition" or "fresh produce M&A", stop and add a software qualifier.
+Every single non-regulatory query must contain BOTH an industry anchor (in its narrowest form) AND (for physical-industry trackers) a software qualifier. If you find yourself writing "HEB acquisition" or "fresh produce M&A" or "food supply chain acquisition", stop and (a) narrow the anchor and (b) add a software qualifier.
 
-Generate the structured tracker config now. Remember: news-only (avoid market-report queries), mix broad event queries with named queries, use strong event verbs, every query needs an industry anchor + software qualifier (except regulatory-landscape queries), 8-15 queries per theme."""
+ALSO AVOID generic adjacencies — for a fresh-produce-software tracker, "supply chain software acquisition" is too broad (matches Manhattan Associates, Blue Yonder, manufacturing supply chain); needs to be "fresh produce supply chain software acquisition" or "produce traceability software acquisition".
+
+Generate the structured tracker config now. Remember: news-only (avoid market-report queries, earnings posts, IPO tracker listicles), mix broad event queries with named queries, use strong event verbs, every query needs the narrowest industry anchor + software qualifier (except regulatory-landscape queries), 8-15 queries per theme."""
 
 
 def generate_config(
@@ -324,4 +326,74 @@ def generate_config(
         }
     except Exception as e:
         print(f"Claude API error during config generation: {e}")
+        return None
+
+
+def revise_config(
+    previous_config: dict,
+    feedback: str,
+    company_name: str,
+    industry_description: str,
+    enabled_categories: list[str],
+    specifics: str = "",
+    other_description: str = "",
+) -> Optional[dict]:
+    """Take an existing generated config + user feedback in plain English, and ask
+    Claude to return a revised version. Same return shape as `generate_config`.
+    """
+    api_key = get_anthropic_key()
+    if not api_key:
+        return None
+    try:
+        import anthropic
+    except ImportError:
+        return None
+
+    if not enabled_categories:
+        enabled_categories = [k for k, v in CATEGORY_DEFINITIONS.items() if v["default"]]
+
+    base_prompt = _build_user_prompt(company_name, industry_description, enabled_categories, specifics, other_description)
+
+    # Serialize the previous config compactly so Claude can see what to revise.
+    prev_themes_text = "\n".join(
+        f"## Theme: {t.get('name', '')}\n" + "\n".join(f"- {q}" for q in t.get("queries", []))
+        for t in previous_config.get("themes", [])
+    )
+
+    revise_prompt = f"""{base_prompt}
+
+# PREVIOUS GENERATED CONFIG
+You generated the following themes and queries previously. The user has feedback below — REVISE the config based on their feedback. Keep what's good, change what they're asking you to change. Preserve the same number of themes (one per enabled category) and the same priority ordering. Aim for 8-15 queries per theme.
+
+Title: {previous_config.get('title', '')}
+Subtitle: {previous_config.get('subtitle', '')}
+
+{prev_themes_text}
+
+# USER FEEDBACK (apply this to the revision)
+{feedback.strip()}
+
+Return the FULL revised config — title, subtitle, all themes, all queries. Apply the user's feedback throughout (not just to one theme). Re-check every query against the rules in your system prompt before returning."""
+
+    try:
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.parse(
+            model="claude-sonnet-4-6",
+            max_tokens=6000,
+            system=[{
+                "type": "text",
+                "text": SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }],
+            messages=[{"role": "user", "content": revise_prompt}],
+            output_format=GeneratedConfig,
+        )
+        cfg: GeneratedConfig = response.parsed_output
+        return {
+            "title": cfg.title,
+            "subtitle": cfg.subtitle,
+            "themes": [{"name": t.name, "queries": t.queries} for t in cfg.themes],
+        }
+    except Exception as e:
+        print(f"Claude API error during config revision: {e}")
         return None
