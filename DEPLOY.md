@@ -57,6 +57,18 @@ Click here for a pre-scoped token form:
 
 ---
 
+### Step 3b — Get an Anthropic API key (3 minutes)
+
+Used to translate natural-language descriptions into themes + Google News queries. Costs ~$0.01-0.03 per tracker creation. A $5 minimum credit lasts essentially forever for this use case (~3,000 tracker creations).
+
+1. Go to **https://console.anthropic.com/settings/keys**
+2. Sign in (or sign up) with your Banneker email
+3. Click **Create Key** → name `banneker-scraper-template` → copy (starts with `sk-ant-...`)
+4. Go to **Billing** → add $5 credit (one-time, prepaid)
+5. Paste the API key back to me
+
+---
+
 ### Step 4 — Sign up for Resend for email delivery (5 minutes)
 
 Free tier: 3,000 emails/month. No credit card.
@@ -88,6 +100,7 @@ After you've completed Steps 1-4 and I've pushed the code, click this link to de
    GITHUB_PAT = "paste_your_pat"
    RESEND_API_KEY = "paste_your_resend_key"
    RESEND_FROM = "Banneker Brief <onboarding@resend.dev>"
+   ANTHROPIC_API_KEY = "paste_your_anthropic_key"
    ```
 
 - Once deployed, paste the live URL back to me

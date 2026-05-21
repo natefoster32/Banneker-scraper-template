@@ -28,9 +28,10 @@ from core import (
     pick_top_stories,
     scrape_for_config,
 )
+from core import build_email_html
 from email_sender import send_email
+from query_generator import generate_config, get_anthropic_key
 from storage import delete_config, get_config, load_all_configs, upsert_config
-from templates import TEMPLATES, get_template, get_template_names
 
 # ---------- Page setup ----------
 
@@ -198,93 +199,188 @@ def render_home():
 
 # ---------- Create ----------
 
-def _init_form_state(template_name: str | None = None, existing_config: dict | None = None):
-    if existing_config:
-        st.session_state["form_themes"] = existing_config.get("themes", [])
-        st.session_state["form_name"] = existing_config.get("name", "")
-        st.session_state["form_subtitle"] = existing_config.get("subtitle", "")
-        st.session_state["form_title"] = existing_config.get("title", "")
-        st.session_state["form_lookback"] = existing_config.get("lookback_days", 7)
-        st.session_state["form_show_top_news"] = existing_config.get("show_top_news", True)
-        st.session_state["form_show_download"] = existing_config.get("show_download", True)
-        return
-    if template_name:
-        tmpl = get_template(template_name)
-        st.session_state["form_themes"] = [
-            {"name": t["name"], "queries": list(t["queries"])} for t in tmpl["themes"]
-        ]
-    else:
-        st.session_state.setdefault("form_themes", [{"name": "", "queries": []}])
-    st.session_state.setdefault("form_name", "")
-    st.session_state.setdefault("form_subtitle", "Banneker Partners · Market Intel")
-    st.session_state.setdefault("form_title", "")
-    st.session_state.setdefault("form_lookback", 7)
-    st.session_state.setdefault("form_show_top_news", True)
-    st.session_state.setdefault("form_show_download", True)
+FORM_KEYS = [
+    "form_name", "form_industry", "form_themes_desc", "form_email",
+    "form_frequency", "form_generated_title", "form_generated_subtitle",
+    "form_generated_themes", "form_lookback",
+]
+
+
+def _clear_form_state():
+    for k in FORM_KEYS:
+        st.session_state.pop(k, None)
+
+
+def _seed_form_from_existing(cfg: dict):
+    st.session_state["form_name"] = cfg.get("name", "")
+    st.session_state["form_industry"] = cfg.get("industry_description", "")
+    st.session_state["form_themes_desc"] = cfg.get("themes_description", "")
+    sub = cfg.get("email_subscription") or {}
+    st.session_state["form_email"] = sub.get("email", "")
+    st.session_state["form_frequency"] = sub.get("frequency", "none")
+    st.session_state["form_generated_title"] = cfg.get("title", "")
+    st.session_state["form_generated_subtitle"] = cfg.get("subtitle", "")
+    st.session_state["form_generated_themes"] = cfg.get("themes", [])
+    st.session_state["form_lookback"] = cfg.get("lookback_days", 7)
 
 
 def render_create(edit_id: str | None = None):
     existing = get_config(edit_id) if edit_id else None
-    title_text = "Edit tracker" if existing else "Create your tracker"
+    title_text = "Edit your tracker" if existing else "Create your tracker"
     render_masthead(title_text)
 
-    # Initialize form state
-    if "form_themes" not in st.session_state:
-        if existing:
-            _init_form_state(existing_config=existing)
-        else:
-            _init_form_state(template_name="Cybersecurity portco")
+    # Seed state from existing config on first render of edit page
+    if existing and "form_name" not in st.session_state:
+        _seed_form_from_existing(existing)
 
-    # Template picker (only on create, not edit)
-    if not existing:
-        st.markdown(
-            f"<div style='color:{BODY_GREY}; font-size:14px; margin-bottom:8px;'>"
-            "Pick a starter template, then edit themes and queries to fit your portco."
-            "</div>",
-            unsafe_allow_html=True,
+    has_api_key = bool(get_anthropic_key())
+    if not has_api_key:
+        st.error(
+            "Claude API key is not configured. The admin needs to add `ANTHROPIC_API_KEY` "
+            "to Streamlit Secrets before this tracker can be generated. Until then, "
+            "the form below won't work."
         )
-        template_names = get_template_names()
-        chosen = st.selectbox(
-            "Starter template",
-            options=template_names,
-            index=0,
-            help="Loads pre-filled themes and queries. You'll edit them next.",
-            key="template_picker",
-        )
-        if st.button("Load template", key="load_tmpl"):
-            _init_form_state(template_name=chosen)
-            st.rerun()
-        st.markdown(
-            f"<div style='color:{MID_GREY}; font-size:12px; font-style:italic; margin-bottom:24px;'>"
-            f"{TEMPLATES.get(chosen, {}).get('description', '')}"
-            f"</div>",
-            unsafe_allow_html=True,
-        )
-        st.markdown("---")
 
-    # Basics
-    st.markdown(f"<h3 style='color:{NAVY}; margin-bottom:8px;'>Basics</h3>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='color:{BODY_GREY}; font-size:14px; line-height:1.55; margin-bottom:20px; max-width:640px;'>"
+        "Answer three questions about what you want to track. Claude builds the themes and "
+        "search queries for you. Takes about 2 minutes."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+
+    # --- Question 1: Company name ---
+    st.markdown(f"<h3 style='color:{NAVY}; margin-bottom:4px;'>1. Company name</h3>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:8px;'>"
+        "The portco, deal target, or anything else this tracker is about."
+        "</div>",
+        unsafe_allow_html=True,
+    )
     name = st.text_input(
-        "Tracker name *",
+        "Company name",
         value=st.session_state.get("form_name", ""),
-        placeholder="e.g., Industrial Defender weekly brief",
+        placeholder="e.g., AcmeFresh",
         key="form_name",
-    )
-    title_field = st.text_input(
-        "Brief title (shown at top of the brief)",
-        value=st.session_state.get("form_title", ""),
-        placeholder="Defaults to '[Tracker Name] Brief'",
-        key="form_title",
-    )
-    subtitle = st.text_input(
-        "Subtitle / tagline",
-        value=st.session_state.get("form_subtitle", ""),
-        placeholder="e.g., Banneker Partners · OT cybersecurity market intel",
-        key="form_subtitle",
+        label_visibility="collapsed",
     )
 
-    cols = st.columns(3)
+    # --- Question 2: Industry description ---
+    st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>2. Describe the scraper you're looking for</h3>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:8px;'>"
+        "What industry, market, or product space? Be specific. Example: \"Fresh produce "
+        "supply chain software for grocery and foodservice operators.\""
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    industry = st.text_area(
+        "Industry / market",
+        value=st.session_state.get("form_industry", ""),
+        placeholder="e.g., Fresh produce supply chain software for grocery and foodservice operators",
+        key="form_industry",
+        height=100,
+        label_visibility="collapsed",
+    )
+
+    # --- Question 3: Specific themes ---
+    st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>3. Anything specific you want covered?</h3>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:8px;'>"
+        "Regions, competitors, regulatory topics, M&amp;A activity, customer wins, breach news — whatever matters."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    themes_desc = st.text_area(
+        "Themes you care about",
+        value=st.session_state.get("form_themes_desc", ""),
+        placeholder=(
+            "e.g., Competitive M&A in foodtech (Crisp, Afresh, Shelf Engine), "
+            "FSMA 204 traceability rule updates, customer wins at Sprouts/Whole Foods/Costco, "
+            "breaches affecting food retailers"
+        ),
+        key="form_themes_desc",
+        height=120,
+        label_visibility="collapsed",
+    )
+
+    # --- Email + frequency ---
+    st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>4. Email me the brief</h3>", unsafe_allow_html=True)
+    st.markdown(
+        f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:8px;'>"
+        "Optional. Leave email blank to use the web page only, or set frequency to \"Don't email me\"."
+        "</div>",
+        unsafe_allow_html=True,
+    )
+    cols = st.columns([3, 2])
     with cols[0]:
+        email = st.text_input(
+            "Your email",
+            value=st.session_state.get("form_email", ""),
+            placeholder="you@banneker.com",
+            key="form_email",
+        )
+    with cols[1]:
+        freq_options = ["none", "weekly_monday", "weekly_friday", "daily"]
+        freq_labels = {
+            "none": "Don't email me",
+            "weekly_monday": "Weekly · Monday",
+            "weekly_friday": "Weekly · Friday",
+            "daily": "Daily",
+        }
+        frequency = st.selectbox(
+            "Frequency",
+            options=freq_options,
+            index=freq_options.index(st.session_state.get("form_frequency", "none")),
+            format_func=lambda v: freq_labels[v],
+            key="form_frequency",
+        )
+
+    # --- Generate preview button ---
+    st.markdown("---")
+    has_generated = "form_generated_themes" in st.session_state and st.session_state["form_generated_themes"]
+    generate_label = "Regenerate from descriptions" if has_generated else "Generate my tracker"
+
+    if st.button(generate_label, type="primary", key="generate_btn", disabled=not has_api_key):
+        if not name.strip():
+            st.error("Company name is required.")
+        elif not industry.strip():
+            st.error("Industry description is required.")
+        elif not themes_desc.strip():
+            st.error("Themes description is required.")
+        else:
+            with st.spinner("Claude is building your themes and queries..."):
+                generated = generate_config(name, industry, themes_desc)
+            if generated is None:
+                st.error(
+                    "Generation failed. Check that the Claude API key is set in Streamlit Secrets "
+                    "and that `pip install anthropic` was added to requirements.txt."
+                )
+            else:
+                st.session_state["form_generated_title"] = generated["title"]
+                st.session_state["form_generated_subtitle"] = generated["subtitle"]
+                st.session_state["form_generated_themes"] = generated["themes"]
+                st.rerun()
+
+    # --- Preview / edit generated themes ---
+    if has_generated:
+        st.markdown(
+            f"<div style='margin-top:32px;'><h3 style='color:{NAVY};'>Preview</h3>"
+            f"<div style='color:{MID_GREY}; font-size:13px;'>Claude generated the structure below. "
+            f"Tweak any field if you want, then click Save.</div></div>",
+            unsafe_allow_html=True,
+        )
+
+        gen_title = st.text_input(
+            "Brief title",
+            value=st.session_state.get("form_generated_title", ""),
+            key="form_generated_title",
+        )
+        gen_subtitle = st.text_input(
+            "Subtitle",
+            value=st.session_state.get("form_generated_subtitle", ""),
+            key="form_generated_subtitle",
+        )
         lookback = st.selectbox(
             "Lookback window",
             options=[3, 7, 14, 30],
@@ -292,123 +388,91 @@ def render_create(edit_id: str | None = None):
             format_func=lambda d: f"Past {d} days",
             key="form_lookback",
         )
-    with cols[1]:
-        show_top = st.checkbox(
-            "Show top-news card",
-            value=st.session_state.get("form_show_top_news", True),
-            key="form_show_top_news",
-        )
-    with cols[2]:
-        show_dl = st.checkbox(
-            "Show Word download",
-            value=st.session_state.get("form_show_download", True),
-            key="form_show_download",
-        )
 
-    # Themes editor
-    st.markdown(f"<h3 style='color:{NAVY}; margin-top:32px; margin-bottom:8px;'>Themes &amp; queries</h3>", unsafe_allow_html=True)
-    st.markdown(
-        f"<div style='color:{BODY_GREY}; font-size:13px; margin-bottom:16px;'>"
-        "Each theme becomes a section in your brief. Queries within a theme are run against Google News "
-        "RSS. Be specific (e.g., 'NIS2 directive', not 'cybersecurity rules'). 3-10 queries per theme works "
-        "well; more queries = wider coverage but slower scrape."
-        "</div>",
-        unsafe_allow_html=True,
-    )
-
-    themes = st.session_state["form_themes"]
-    new_themes = []
-    for i, theme in enumerate(themes):
-        with st.container():
+        st.markdown(f"<h4 style='color:{NAVY}; margin-top:20px;'>Themes &amp; queries</h4>", unsafe_allow_html=True)
+        themes = st.session_state["form_generated_themes"]
+        edited_themes = []
+        for i, theme in enumerate(themes):
             st.markdown(
-                f"<div style='background:{ICE_BLUE}; padding:14px 16px; border-radius:4px; margin-bottom:6px; border-left:4px solid {NAVY};'>"
-                f"<div style='color:{NAVY}; font-weight:700; font-size:12px; letter-spacing:1.2px; text-transform:uppercase;'>Theme {i+1:02d}</div>"
+                f"<div style='background:{ICE_BLUE}; padding:10px 14px; border-radius:3px; margin-top:14px; margin-bottom:4px; border-left:3px solid {NAVY};'>"
+                f"<div style='color:{NAVY}; font-weight:700; font-size:11px; letter-spacing:1.2px; text-transform:uppercase;'>Theme {i+1:02d}</div>"
                 f"</div>",
                 unsafe_allow_html=True,
             )
-            theme_name = st.text_input(
-                f"Theme name",
-                value=theme.get("name", ""),
-                placeholder="e.g., Breaches & incidents",
-                key=f"theme_name_{i}",
-            )
-            queries_text = "\n".join(theme.get("queries", []))
-            queries_input = st.text_area(
-                f"Queries (one per line)",
-                value=queries_text,
-                placeholder="e.g.\nNIS2 directive\nCyber Resilience Act\nDORA cybersecurity",
+            t_name = st.text_input("Theme name", value=theme["name"], key=f"theme_name_{i}",
+                                   label_visibility="collapsed")
+            t_queries = st.text_area(
+                "Queries (one per line)",
+                value="\n".join(theme["queries"]),
                 key=f"theme_queries_{i}",
-                height=120,
+                height=110,
             )
-            cols = st.columns([1, 1, 6])
-            with cols[0]:
-                if st.button("↑", key=f"up_{i}", help="Move up", disabled=(i == 0)):
+            ctrl_cols = st.columns([1, 1, 6])
+            with ctrl_cols[0]:
+                if st.button("↑", key=f"up_{i}", disabled=(i == 0)):
                     themes[i], themes[i-1] = themes[i-1], themes[i]
-                    st.session_state["form_themes"] = themes
+                    st.session_state["form_generated_themes"] = themes
                     st.rerun()
-            with cols[1]:
-                if st.button("↓", key=f"down_{i}", help="Move down", disabled=(i == len(themes) - 1)):
+            with ctrl_cols[1]:
+                if st.button("↓", key=f"down_{i}", disabled=(i == len(themes) - 1)):
                     themes[i], themes[i+1] = themes[i+1], themes[i]
-                    st.session_state["form_themes"] = themes
+                    st.session_state["form_generated_themes"] = themes
                     st.rerun()
-            with cols[2]:
-                if st.button("Remove this theme", key=f"del_{i}"):
+            with ctrl_cols[2]:
+                if st.button("Remove", key=f"del_{i}"):
                     themes.pop(i)
-                    st.session_state["form_themes"] = themes
+                    st.session_state["form_generated_themes"] = themes
                     st.rerun()
-
-            new_themes.append({
-                "name": theme_name.strip(),
-                "queries": [q.strip() for q in queries_input.split("\n") if q.strip()],
+            edited_themes.append({
+                "name": t_name.strip(),
+                "queries": [q.strip() for q in t_queries.split("\n") if q.strip()],
             })
 
-    if st.button("+ Add another theme", key="add_theme"):
-        themes.append({"name": "", "queries": []})
-        st.session_state["form_themes"] = themes
-        st.rerun()
+        st.markdown("---")
+        if st.button("Save tracker" if not existing else "Update tracker",
+                     type="primary", key="save_tracker"):
+            valid_themes = [t for t in edited_themes if t["name"] and t["queries"]]
+            if not valid_themes:
+                st.error("Need at least one theme with at least one query.")
+                return
 
-    # Save
-    st.markdown("---")
-    if st.button("Save tracker" if not existing else "Update tracker", type="primary", key="save_tracker"):
-        if not name.strip():
-            st.error("Tracker name is required.")
-            return
-        valid_themes = [t for t in new_themes if t["name"] and t["queries"]]
-        if not valid_themes:
-            st.error("Add at least one theme with at least one query.")
-            return
+            if email.strip() and frequency != "none":
+                email_subscription = {
+                    "email": email.strip(),
+                    "frequency": frequency,
+                    "last_sent": (existing or {}).get("email_subscription", {}).get("last_sent")
+                                  if existing else None,
+                }
+            else:
+                email_subscription = None
 
-        tracker_id = edit_id or make_tracker_id(name)
-        config = {
-            "id": tracker_id,
-            "name": name.strip(),
-            "title": title_field.strip() or f"{name.strip()} Brief",
-            "subtitle": subtitle.strip(),
-            "themes": valid_themes,
-            "lookback_days": int(lookback),
-            "show_top_news": bool(show_top),
-            "show_download": bool(show_dl),
-            "created_at": (existing or {}).get("created_at") or datetime.utcnow().isoformat(),
-            "updated_at": datetime.utcnow().isoformat(),
-            "email_subscription": (existing or {}).get("email_subscription"),
-        }
-        try:
-            upsert_config(tracker_id, config)
-        except Exception as e:
-            st.error(f"Failed to save: {e}")
-            return
+            tracker_id = edit_id or make_tracker_id(name)
+            config = {
+                "id": tracker_id,
+                "name": name.strip(),
+                "industry_description": industry.strip(),
+                "themes_description": themes_desc.strip(),
+                "title": gen_title.strip() or f"{name.strip()} Brief",
+                "subtitle": gen_subtitle.strip(),
+                "themes": valid_themes,
+                "lookback_days": int(lookback),
+                "show_top_news": True,
+                "show_download": True,
+                "created_at": (existing or {}).get("created_at") or datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
+                "email_subscription": email_subscription,
+            }
+            try:
+                upsert_config(tracker_id, config)
+            except Exception as e:
+                st.error(f"Failed to save: {e}")
+                return
 
-        # Clear form state
-        for k in [
-            "form_themes", "form_name", "form_subtitle", "form_title",
-            "form_lookback", "form_show_top_news", "form_show_download",
-        ]:
-            st.session_state.pop(k, None)
-
-        st.success("Saved. Redirecting to your tracker...")
-        st.query_params.clear()
-        st.query_params.update({"id": tracker_id})
-        st.rerun()
+            _clear_form_state()
+            st.success("Saved. Redirecting to your tracker...")
+            st.query_params.clear()
+            st.query_params.update({"id": tracker_id})
+            st.rerun()
 
     render_footer()
 
@@ -438,21 +502,46 @@ def render_view(tracker_id: str):
     )
 
     # Top action row
-    cols = st.columns([3, 1, 1, 1])
+    cols = st.columns([3, 1, 1, 1, 1])
     with cols[0]:
         go = st.button("Generate this week's brief", type="primary", key="generate")
     with cols[1]:
         if st.button("Edit", key="edit_btn"):
+            _clear_form_state()
             st.query_params.clear()
             st.query_params.update({"page": "create", "id": tracker_id})
             st.rerun()
     with cols[2]:
-        if st.button("Email me", key="email_btn"):
+        sub = config.get("email_subscription") or {}
+        email_btn_label = "Manage email" if sub else "Email me"
+        if st.button(email_btn_label, key="email_btn"):
             st.session_state["show_email_form"] = True
     with cols[3]:
+        if st.button("Test email", key="test_email_btn", help="Send the current brief to your inbox now"):
+            st.session_state["send_test_email"] = True
+    with cols[4]:
         if st.button("← Home", key="home_btn"):
             st.query_params.clear()
             st.rerun()
+
+    # Handle test-email click
+    if st.session_state.get("send_test_email"):
+        st.session_state["send_test_email"] = False
+        sub = config.get("email_subscription") or {}
+        recipient = sub.get("email", "")
+        if not recipient:
+            st.warning("Set up your email first via the 'Email me' button.")
+        else:
+            with st.spinner(f"Sending a test brief to {recipient}..."):
+                grouped, total = scrape_for_config(config)
+                theme_order = [t["name"] for t in config.get("themes", []) if t.get("name")]
+                html = build_email_html(grouped, theme_order, total, config, unsubscribe_url=None)
+                subject = f"[TEST] {title} — {datetime.now().strftime('%b %d, %Y')}"
+                ok, info = send_email(recipient, subject, html)
+            if ok:
+                st.success(f"Sent. Check {recipient}.")
+            else:
+                st.error(f"Send failed: {info}")
 
     # Cache-bust on config change
     cfg_hash = config_hash(config)
@@ -628,7 +717,26 @@ def render_view(tracker_id: str):
 params = st.query_params
 page = params.get("page", "")
 tracker_id = params.get("id", "")
+action = params.get("action", "")
 edit_mode = params.get("edit", "") == "1" or (page == "create" and tracker_id)
+
+# Handle one-click unsubscribe from email footer link
+if tracker_id and action == "unsubscribe":
+    cfg = get_config(tracker_id)
+    if cfg:
+        old_email = (cfg.get("email_subscription") or {}).get("email", "")
+        cfg["email_subscription"] = None
+        try:
+            upsert_config(tracker_id, cfg)
+            render_masthead(cfg.get("title") or "Unsubscribed")
+            st.success(f"Unsubscribed {old_email or 'this address'} from {cfg.get('name', 'this tracker')}. You can resubscribe anytime by visiting your tracker and clicking 'Email me'.")
+            st.markdown(f"[Open this tracker](?id={tracker_id})")
+        except Exception as e:
+            st.error(f"Failed to unsubscribe: {e}")
+        render_footer()
+    else:
+        st.error(f"Tracker '{tracker_id}' not found.")
+    st.stop()
 
 if page == "create":
     render_create(edit_id=tracker_id if edit_mode else None)
