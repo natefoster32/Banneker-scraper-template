@@ -285,7 +285,7 @@ def render_create(edit_id: str | None = None):
         "form_other_description": "",
         "form_email": "",
         "form_frequency": "none",
-        "form_lookback": 7,
+        "form_lookback": 14,
         "form_generated_title": "",
         "form_generated_subtitle": "",
     }
@@ -329,16 +329,17 @@ def render_create(edit_id: str | None = None):
     )
 
     # --- Question 2: Industry (one line) ---
-    st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>2. Industry / market</h3>", unsafe_allow_html=True)
+    st.markdown(f"<h3 style='color:{NAVY}; margin-top:24px; margin-bottom:4px;'>2. Market</h3>", unsafe_allow_html=True)
     st.markdown(
         f"<div style='color:{MID_GREY}; font-size:13px; margin-bottom:8px;'>"
-        "One sentence on what this company does and who it sells to."
+        "What market does this company sell into? (You don't need to say \"software\" — that's implied.) "
+        "Be as narrow as you can — \"fresh produce supply chain\" beats \"food supply chain.\""
         "</div>",
         unsafe_allow_html=True,
     )
     industry = st.text_input(
-        "Industry / market",
-        placeholder="e.g., OT security for critical infrastructure",
+        "Market",
+        placeholder="e.g., fresh produce supply chain  ·  OT security for critical infrastructure  ·  medical RCM",
         key="form_industry",
         label_visibility="collapsed",
     )

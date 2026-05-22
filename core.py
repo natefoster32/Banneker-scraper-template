@@ -144,14 +144,25 @@ def is_spam_item(item: dict) -> bool:
 
 
 def passes_relevance_filter(title: str, anchor_terms: list[str]) -> bool:
-    """Return True if title contains at least one industry-anchor term.
-    This is what catches loose Google News matches that share keywords but
-    aren't actually about the user's industry. If no anchor_terms (back-compat
-    for old configs), pass everything through."""
+    """Return True if title contains at least one industry-anchor term as a
+    whole word/phrase (not a substring). This catches loose Google News
+    matches that share keywords but aren't actually about the user's
+    industry. Word-boundary matching prevents "silo" the company from
+    matching "data silos" or "measurement silos." If no anchor_terms
+    (back-compat for old configs), pass everything through."""
     if not anchor_terms:
         return True
     low = title.lower()
-    return any(t in low for t in anchor_terms if t)
+    for t in anchor_terms:
+        t = t.strip().lower()
+        if not t:
+            continue
+        # Word boundary on both ends. Escape regex metachars (& . - etc.)
+        # so multi-word anchors like "fresh produce" match cleanly.
+        pattern = r"\b" + re.escape(t) + r"\b"
+        if re.search(pattern, low):
+            return True
+    return False
 
 
 # Recognized news outlets — small score bonus, helps surface real journalism

@@ -94,7 +94,7 @@ CATEGORY_DEFINITIONS = {
         "default": False,
         "guidance": (
             "User-defined theme. The user fills in a dedicated 'Other theme description' "
-            "field — read it carefully and build a theme name and 8-15 queries around exactly "
+            "field — read it carefully and build a theme name and 12-18 queries around exactly "
             "that topic. Apply the same principles: broad event queries + named-entity queries, "
             "strong event verbs, avoid market-report phrasing. If the Other-theme description "
             "is empty or doesn't suggest a clear topic, skip this theme entirely."
@@ -110,7 +110,7 @@ def category_keys() -> list[str]:
 # Structured-output schema returned by Claude
 class GeneratedTheme(BaseModel):
     name: str = Field(description="Short theme name (3-7 words). Will be used as a section heading.")
-    queries: list[str] = Field(description="8-15 Google News search queries that target this theme.")
+    queries: list[str] = Field(description="12-18 Google News search queries that target this theme. Err toward 15-18; the post-scrape anchor filter drops irrelevant matches.")
 
 
 class GeneratedConfig(BaseModel):
@@ -133,9 +133,9 @@ class GeneratedConfig(BaseModel):
     )
 
 
-SYSTEM_PROMPT = """You are an analyst at Banneker Partners, a software-focused private equity firm. You build weekly news trackers for portfolio companies and deal targets.
+SYSTEM_PROMPT = """You are an analyst at Banneker Partners, a US-focused lower-middle-market software-only private equity firm. EVERY tracker you build is for a SOFTWARE/TECH company — the user does NOT need to type "software" in their industry description. Software is the default. If they wrote "fresh produce supply chain," it means "fresh produce supply chain SOFTWARE." If they wrote "OT security for critical infrastructure," it means "OT cybersecurity SOFTWARE." Always interpret the industry as the software/tech sub-segment of that physical industry.
 
-Your job: take a brief description of a company plus a list of enabled theme categories, then return a structured set of themes and Google News RSS queries that will surface HIGH-SIGNAL NEWS.
+Your job: take a brief description of a company plus a list of enabled theme categories, then return a structured set of themes and Google News RSS queries that will surface HIGH-SIGNAL NEWS specifically about that company's market.
 
 # CRITICAL PRINCIPLES
 
@@ -154,7 +154,7 @@ Every theme needs both, because:
 - Broad queries catch deals/incidents involving unknown players. (Most acquisitions don't name the acquirer in the headline.)
 - Named queries catch news about specific competitors/regulations/companies the user cares about.
 
-For each theme, aim for ~5-8 broad event queries + ~3-7 named-entity queries = 8-15 total.
+For each theme, aim for ~8-10 broad event queries + ~5-8 named-entity queries = 12-18 total. Err on the side of MORE queries (15-18) rather than fewer — every additional query is another chance to catch a relevant story, and our post-scrape anchor filter drops anything irrelevant anyway. With aggressive filtering on the back end, breadth on queries is free.
 
 Example (competitive theme for an OT cyber portco):
 - Broad: "OT cybersecurity acquisition", "industrial cybersecurity Series B", "ICS vendor acquired", "OT security funding round", "operational technology cybersecurity investment", "industrial control system IPO"
@@ -178,9 +178,10 @@ Talent: appoints, hires, joins, departs, resigns, names CEO
 
 ## 4. Be specific with regulations and named entities, generic with categories.
 
-- For regulations: name the actual regulation/agency ("NIS2 directive enforcement", "NERC-CIP audit", "FSMA 204 traceability", "CFPB enforcement"), not "regulations" or "compliance"
+- For regulations: name regulations DIRECTLY relevant to THIS market only. Fresh produce → FSMA 204, FDA food traceability, USDA produce safety, Country of Origin Labeling. OT cybersecurity → NERC-CIP, TSA pipeline directives, NIS2 (EU), CISA advisories. Healthcare → HIPAA, FDA 510k, CMS reimbursement, ONC interoperability. NOT generic compliance buzz (SOX, GDPR, EU AI Act) unless the user's market specifically deals with those.
 - For competitors: name them individually as separate queries
 - For verticals: use vertical qualifiers ("utility cyberattack", "manufacturing ransomware"), not the bare category
+- Specificity rule: the regulations and named entities you pick should be answerable to "would an actual operator in this specific market care about this?" — not "is this a PE-relevant regulation in general?"
 
 ## 5. EVERY query MUST include an industry-anchor term. (Critical.)
 
@@ -264,7 +265,7 @@ Return one theme per enabled category, in this priority order if applicable:
 6. Geographic
 7. Talent
 
-Each theme should have 8-15 queries. Mix broad event queries with named-entity queries pulled from the user's specifics (if provided).
+Each theme should have 12-18 queries. Mix broad event queries with named-entity queries pulled from the user's specifics (if provided).
 
 If the "Other" category is enabled but the Other-theme description is empty, skip that theme — don't fabricate one.
 
@@ -275,14 +276,21 @@ If the "Other" category is enabled but the Other-theme description is empty, ski
 
 # ANCHOR TERMS (CRITICAL — your output `anchor_terms` list)
 
-You must also output `anchor_terms` — 6-12 lowercase keywords/short phrases used as a post-scrape relevance filter. After we fetch Google News results for your queries, we DROP any story whose title doesn't contain at least one anchor term. This is what saves us from "wholesale nicotine packets" and "blood sugar tracking" showing up because they happened to share words with a query.
+You must also output `anchor_terms` — 10-18 lowercase keywords/short phrases used as a post-scrape relevance filter. After we fetch Google News results for your queries, we DROP any story whose title doesn't contain at least one anchor term as a WHOLE WORD (word-boundary regex match, so "silo" matches "Silo Inc" but NOT "data silos"). This saves us from "wholesale nicotine packets" and "blood sugar tracking" showing up because they happened to share words with a query.
 
-- Include the narrowest-form industry-defining keywords (e.g. for fresh produce SW: "fresh produce", "produce traceability", "produce software", "grocery saas", "agtech software")
-- Include every named competitor/customer/regulation from the user's specifics (e.g. "producepay", "crisp", "afresh", "shelf engine", "silo")
-- Don't include generic event words ("acquisition", "raises", "Series B") — those don't define industry relevance
-- Don't include words so common they'd let spam through ("technology", "software", "company" alone)
+What to include:
+- 4-7 narrowest-form industry-defining phrases (e.g. for fresh produce SW: "fresh produce", "produce traceability", "produce software", "grocery saas", "agtech", "food traceability software")
+- Every named competitor / named customer / named regulation from the user's specifics. Prefer MULTI-WORD or HIGH-SPECIFICITY forms — "shelf engine" is safer than just "shelf"; "producepay" is fine; "Silo agtech" or "Silo produce" is safer than bare "silo" if Silo is the company you mean.
+- Tracked agency / regulation acronyms when they're specific to this market (FSMA, FDA, USDA for food; NERC-CIP, TSA, CISA for OT cyber; CMS, HHS for healthcare) — NOT generic ones (SOX, GDPR, HIPAA, etc.) unless the user explicitly is in that compliance market.
 
-Test: if I ran your anchor_terms against the title "Wholesale Nicotine Packets: Supply Chain Solutions [hashID] - stat.gov.pl", would any match? If yes, your anchors are too loose.
+What NOT to include:
+- Generic event words ("acquisition", "raises", "Series B", "funding") — those don't define industry relevance
+- Too-common single words ("technology", "software", "company", "platform", "data", "silo" alone, "fresh" alone) — these would let unrelated content slip through
+- Generic regulations not directly relevant to THIS market (no SOX/GDPR/HIPAA on a produce-SW tracker)
+
+Short or common-word company-name trap: if a competitor has a 4-letter or otherwise generic name (Silo, Trace, Bolt, Crop, etc.), include it as a multi-word phrase paired with industry context ("Silo agtech", "Trace produce", "Bolt logistics") — never as a bare single word that would match unrelated headlines.
+
+Test: if I ran your anchor_terms against the title "From Measurement Silos to Smart Manufacturing Intelligence" — would any match? It shouldn't. If "silo" alone is in your list and word-boundary matching means it only matches "silo" exactly (not "silos"), you're fine — but be defensive and use "silo agtech" anyway.
 
 Return ONLY the structured JSON — no preamble, no explanation."""
 
@@ -329,7 +337,7 @@ Generate the structured tracker config now. Remember:
 - Every query needs the narrowest industry anchor + software qualifier (except regulatory-landscape queries)
 - Bias toward PRIVATE companies (LMM software) and US market (unless user named other regions)
 - For named entities, prefer private competitors (e.g. ProducePay/Crisp/Afresh) over public giants (Manhattan/SAP/Oracle)
-- 8-15 queries per theme"""
+- 12-18 queries per theme"""
 
 
 def generate_config(
@@ -422,7 +430,7 @@ def revise_config(
     revise_prompt = f"""{base_prompt}
 
 # PREVIOUS GENERATED CONFIG
-You generated the following themes, queries, and anchor terms previously. The user has feedback below — REVISE the config based on their feedback. Keep what's good, change what they're asking you to change. Preserve the same number of themes (one per enabled category) and the same priority ordering. Aim for 8-15 queries per theme.
+You generated the following themes, queries, and anchor terms previously. The user has feedback below — REVISE the config based on their feedback. Keep what's good, change what they're asking you to change. Preserve the same number of themes (one per enabled category) and the same priority ordering. Aim for 12-18 queries per theme.
 
 Title: {previous_config.get('title', '')}
 Subtitle: {previous_config.get('subtitle', '')}
